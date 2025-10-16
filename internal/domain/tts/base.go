@@ -9,6 +9,7 @@ import (
 	"xiaozhi-esp32-server-golang/internal/domain/tts/doubao"
 	"xiaozhi-esp32-server-golang/internal/domain/tts/edge"
 	"xiaozhi-esp32-server-golang/internal/domain/tts/edge_offline"
+	"xiaozhi-esp32-server-golang/internal/domain/tts/openai"
 	"xiaozhi-esp32-server-golang/internal/domain/tts/xiaozhi"
 )
 
@@ -40,6 +41,8 @@ func GetTTSProvider(providerName string, config map[string]interface{}) (TTSProv
 		baseProvider = edge_offline.NewEdgeOfflineTTSProvider(config)
 	case constants.TtsTypeXiaozhi:
 		baseProvider = xiaozhi.NewXiaozhiProvider(config)
+	case constants.TtsTypeOpenAI:
+		baseProvider = openai.NewOpenAITTSProvider(config)
 	default:
 		return nil, fmt.Errorf("不支持的TTS提供者: %s", providerName)
 	}

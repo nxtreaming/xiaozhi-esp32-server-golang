@@ -72,7 +72,7 @@ func NewCosyVoiceTTSProvider(config map[string]interface{}) *CosyVoiceTTSProvide
 
 	// 设置默认值
 	if apiURL == "" {
-		apiURL = "https://tts.linkerai.top/tts"
+		apiURL = "https://tts.linkerai.cn/tts"
 	}
 	if speakerID == "" {
 		speakerID = "OUeAo1mhq6IBExi"

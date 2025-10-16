@@ -24,4 +24,5 @@ const (
 	TtsTypeEdge        = "edge"
 	TtsTypeEdgeOffline = "edge_offline"
 	TtsTypeXiaozhi     = "xiaozhi"
+	TtsTypeOpenAI      = "openai"
 )

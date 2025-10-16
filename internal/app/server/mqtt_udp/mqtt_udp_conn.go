@@ -63,6 +63,7 @@ func NewMqttUdpConn(deviceID string, pubTopic string, mqttClient mqtt.Client, ud
 
 // SendCmd 通过 MQTT-UDP 发送命令（需对接实际发送逻辑）
 func (c *MqttUdpConn) SendCmd(msg []byte) error {
+	log.Debugf("mqtt udp conn send cmd, topic: %s, msg: %s", c.PubTopic, string(msg))
 	c.lastActiveTs = time.Now().Unix()
 	token := c.MqttClient.Publish(c.PubTopic, 0, false, msg)
 	token.Wait()

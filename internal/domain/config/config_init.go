@@ -3,7 +3,7 @@ package user_config
 import (
 	"context"
 	"fmt"
-	"log"
+	log "xiaozhi-esp32-server-golang/logger"
 
 	"xiaozhi-esp32-server-golang/internal/domain/config/manager"
 	"xiaozhi-esp32-server-golang/internal/domain/config/memory"
@@ -19,10 +19,10 @@ func InitConfigSystem(ctx context.Context) error {
 	providerType := viper.GetString("config_provider.type")
 	if providerType == "" {
 		providerType = "redis" // 默认使用redis
-		log.Printf("config_provider.type not set, using default: redis")
+		log.Infof("config_provider.type not set, using default: redis")
 	}
 
-	log.Printf("Initializing config system with provider: %s", providerType)
+	log.Infof("Initializing config system with provider: %s", providerType)
 
 	// 根据配置提供者类型调用对应的Init方法
 	switch providerType {

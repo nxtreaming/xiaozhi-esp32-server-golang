@@ -621,6 +621,23 @@ func sendIotMessage(mqttClient mqtt.Client, sessionID string) error {
 	return nil
 }
 
+func sendAbort(mqttClient mqtt.Client, sessionID string) error {
+	message := ClientMessage{
+		Type:      "abort",
+		SessionID: sessionID,
+	}
+	jsonData, err := json.Marshal(message)
+	if err != nil {
+		return err
+	}
+	fmt.Println("📤 发布消息to topic:", "", string(jsonData))
+	token := mqttClient.Publish(serverConfig.MQTT.PublishTopic, byte(0), false, jsonData)
+	if token.Wait() && token.Error() != nil {
+		return token.Error()
+	}
+	return nil
+}
+
 // 调用tts服务生成语音, 并编码至opus发送至服务端
 func sendTextToSpeech(mqttClient mqtt.Client, sessionID string, udpInstance *UDPClient, udpConfig *UDPConfig) error {
 	cosyVoiceConfig := map[string]interface{}{
@@ -689,7 +706,10 @@ func sendTextToSpeech(mqttClient mqtt.Client, sessionID string, udpInstance *UDP
 		//fmt.Println("收到音频数据", len(decryptedData))
 	})
 
-	genAndSendAudio := func(msg string, count int) error {
+	var audioCtx context.Context
+	var audioCancel context.CancelFunc
+
+	genAndSendAudio := func(ctx context.Context, msg string, count int) error {
 		sendListenStart(mqttClient, sessionID)
 		defer func() {
 			isStart = true
@@ -703,6 +723,11 @@ func sendTextToSpeech(mqttClient mqtt.Client, sessionID string, udpInstance *UDP
 		}
 
 		for audioData := range audioChan {
+			select {
+			case <-ctx.Done():
+				return nil
+			default:
+			}
 			fmt.Printf("生成语音数据长度: %d\n", len(audioData))
 			udpInstance.SendAudioData(audioData)
 			time.Sleep(60 * time.Millisecond)
@@ -729,9 +754,13 @@ func sendTextToSpeech(mqttClient mqtt.Client, sessionID string, udpInstance *UDP
 		}
 		input = strings.TrimSpace(input)
 		if input == "" {
+			sendAbort(mqttClient, sessionID)
+			audioCancel()
 			return false
 		}
-		genAndSendAudio(input, 50)
+
+		audioCtx, audioCancel = context.WithCancel(context.Background())
+		genAndSendAudio(audioCtx, input, 50)
 		return true
 	}
 	for {

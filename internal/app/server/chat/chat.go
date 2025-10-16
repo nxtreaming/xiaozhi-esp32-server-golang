@@ -29,6 +29,7 @@ type ChatManager struct {
 type ChatManagerOption func(*ChatManager)
 
 func NewChatManager(deviceID string, transport types_conn.IConn, options ...ChatManagerOption) (*ChatManager, error) {
+
 	cm := &ChatManager{
 		DeviceID:  deviceID,
 		transport: transport,
