@@ -6,6 +6,7 @@ import (
 
 	"xiaozhi-esp32-server-golang/internal/domain/memory/mem0"
 	"xiaozhi-esp32-server-golang/internal/domain/memory/memobase"
+	"xiaozhi-esp32-server-golang/internal/domain/memory/nomemo"
 
 	"github.com/cloudwego/eino/schema"
 )
@@ -36,6 +37,7 @@ type MemoryProvider interface {
 type MemoryType string
 
 const (
+	MemoryTypeNone     MemoryType = "nomemo"
 	MemoryTypeMemobase MemoryType = "memobase" // Memobase 长期记忆
 	MemoryTypeMem0     MemoryType = "mem0"     // Mem0 记忆服务
 )
@@ -47,7 +49,12 @@ func GetProvider(memoryType MemoryType, config map[string]interface{}) (MemoryPr
 
 // GetProviderByType 根据类型获取记忆提供者
 func GetProviderByType(memoryType MemoryType, config map[string]interface{}) (MemoryProvider, error) {
+	if memoryType == "" {
+		memoryType = MemoryTypeNone
+	}
 	switch memoryType {
+	case MemoryTypeNone:
+		return nomemo.Get(), nil
 	case MemoryTypeMemobase:
 		return memobase.GetWithConfig(config)
 	case MemoryTypeMem0:

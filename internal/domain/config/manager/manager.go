@@ -88,6 +88,10 @@ func (c *ConfigManager) GetUserConfig(ctx context.Context, deviceID string) (typ
 				Provider string `json:"provider"`
 				JsonData string `json:"json_data"`
 			} `json:"tts"`
+			Memory struct {
+				Provider string `json:"provider"`
+				JsonData string `json:"json_data"`
+			} `json:"memory"`
 			Prompt  string `json:"prompt"`
 			AgentId string `json:"agent_id"`
 		} `json:"data"`
@@ -128,6 +132,10 @@ func (c *ConfigManager) GetUserConfig(ctx context.Context, deviceID string) (typ
 		Vad: types.VadConfig{
 			Provider: response.Data.VAD.Provider,
 			Config:   parseJsonData(response.Data.VAD.JsonData),
+		},
+		Memory: types.MemoryConfig{
+			Provider: response.Data.Memory.Provider,
+			Config:   parseJsonData(response.Data.Memory.JsonData),
 		},
 		AgentId: response.Data.AgentId,
 	}

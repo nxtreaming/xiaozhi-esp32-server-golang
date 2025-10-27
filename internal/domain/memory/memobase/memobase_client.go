@@ -12,7 +12,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/memodb-io/memobase/src/client/memobase-go/blob"
 	"github.com/memodb-io/memobase/src/client/memobase-go/core"
-	"github.com/spf13/viper"
 )
 
 var (
@@ -34,57 +33,22 @@ type MemobaseClient struct {
 	SearchTopk      int
 }
 
-// Init 初始化Memobase客户端
-func Init() error {
-	var initErr error
-	once.Do(func() {
-		// 从 memory.memobase 读取配置（参考 tts 和 llm 的配置格式）
-		projectUrl := viper.GetString("memory.memobase.project_url")
-		apiKey := viper.GetString("memory.memobase.api_key")
-
-		if projectUrl == "" || apiKey == "" {
-			initErr = fmt.Errorf("Memobase 配置不完整: project_url 或 api_key 为空")
-			log.Log().Errorf("Memobase 初始化失败: %v", initErr)
-			return
-		}
-
-		client, err := core.NewMemoBaseClient(projectUrl, apiKey)
-		if err != nil {
-			initErr = fmt.Errorf("创建 Memobase 客户端失败: %v", err)
-			log.Log().Errorf("Memobase 初始化失败: %v", initErr)
-			return
-		}
-
-		clientInstance = &MemobaseClient{
-			client: client,
-		}
-
-		log.Log().Infof("Memobase 客户端初始化成功, project_url: %s", projectUrl)
-	})
-	return initErr
-}
-
-// Get 获取Memobase客户端实例
-func Get() *MemobaseClient {
-	if clientInstance == nil {
-		Init()
-	}
-	return clientInstance
-}
-
 // GetWithConfig 使用配置获取Memobase客户端实例（单例模式）
 func GetWithConfig(config map[string]interface{}) (*MemobaseClient, error) {
 	var initErr error
 	configOnce.Do(func() {
+		iClient := &MemobaseClient{
+			users: sync.Map{},
+		}
 		// 从配置中读取 memobase 相关配置		// 读取必要的配置项
-		projectUrlInterface, ok := config["project_url"]
+		projectUrlInterface, ok := config["base_url"]
 		if !ok {
-			initErr = fmt.Errorf("memobase.project_url 配置缺失")
+			initErr = fmt.Errorf("memobase.base_url 配置缺失")
 			return
 		}
-		projectUrl, ok := projectUrlInterface.(string)
+		baseUrl, ok := projectUrlInterface.(string)
 		if !ok {
-			initErr = fmt.Errorf("memobase.project_url 必须是字符串")
+			initErr = fmt.Errorf("memobase.base_url 必须是字符串")
 			return
 		}
 
@@ -99,8 +63,8 @@ func GetWithConfig(config map[string]interface{}) (*MemobaseClient, error) {
 			return
 		}
 
-		if projectUrl == "" || apiKey == "" {
-			initErr = fmt.Errorf("Memobase 配置不完整: project_url 或 api_key 为空")
+		if baseUrl == "" || apiKey == "" {
+			initErr = fmt.Errorf("Memobase 配置不完整: base_url 或 api_key 为空")
 			log.Log().Errorf("Memobase 初始化失败: %v", initErr)
 			return
 		}
@@ -110,7 +74,7 @@ func GetWithConfig(config map[string]interface{}) (*MemobaseClient, error) {
 		if ok {
 			enableSearch, ok := enableSearchInterface.(bool)
 			if ok {
-				clientInstance.EnableSearch = enableSearch
+				iClient.EnableSearch = enableSearch
 			}
 		}
 
@@ -118,7 +82,7 @@ func GetWithConfig(config map[string]interface{}) (*MemobaseClient, error) {
 		if ok {
 			threshold, ok := thresholdInterface.(float64)
 			if ok {
-				clientInstance.SearchThreshold = threshold
+				iClient.SearchThreshold = threshold
 			}
 		}
 
@@ -126,23 +90,22 @@ func GetWithConfig(config map[string]interface{}) (*MemobaseClient, error) {
 		if ok {
 			topK, ok := topKInterface.(int)
 			if ok {
-				clientInstance.SearchTopk = topK
+				iClient.SearchTopk = topK
 			}
 		}
 
 		// 创建客户端
-		client, err := core.NewMemoBaseClient(projectUrl, apiKey)
+		client, err := core.NewMemoBaseClient(baseUrl, apiKey)
 		if err != nil {
 			initErr = fmt.Errorf("创建 Memobase 客户端失败: %v", err)
 			log.Log().Errorf("Memobase 初始化失败: %v", initErr)
 			return
 		}
 
-		clientInstance = &MemobaseClient{
-			client: client,
-		}
+		iClient.client = client
+		clientInstance = iClient
 
-		log.Log().Infof("Memobase 客户端初始化成功, project_url: %s", projectUrl)
+		log.Log().Infof("Memobase 客户端初始化成功, project_url: %s", baseUrl)
 	})
 
 	if initErr != nil {

@@ -294,16 +294,16 @@ local_mcp:
   exit_conversation: true           # 允许退出对话
   clear_conversation_history: true  # 允许清除对话历史
 
-# Memory 记忆配置
+# Memory 长记忆配置
 memory:
-  provider: "llm"  # 记忆提供商: llm(短期对话记忆,基于Redis) 或 memobase(长期记忆)
+  provider: "nomemo"  # 记忆提供商: nomemo(无长记忆) llm(短期对话记忆,基于Redis) 或 memobase(长期记忆)
   # LLM Memory 配置（短期对话记忆）
   # 使用 Redis 存储，配置见上面的 redis 部分
-  llm:
+  nomemo:
     # 无需额外配置，使用全局 redis 配置
   # Memobase 配置（长期记忆存储）
   memobase:
-    project_url: "http://localhost:8000"              # Memobase项目URL
+    base_url: "https://api.memobase.dev"              # Memobase项目URL
     api_key: "your_memobase_api_key_here"             # Memobase API密钥
     api_version: "v1"                                 # API版本
     enable_search: true         #允许在调用llm之前搜索memory,会有200ms左右延迟
@@ -311,7 +311,7 @@ memory:
     search_top_k: 3             #搜索TopK,表示搜索到的memory中,相似度最高的TopK个memory会被加入到llm的输入中
   mem0:
     api_key: "your_mem0_api_key_here"
-    host: "https://api.mem0.ai"
+    base_url: "https://api.mem0.ai"
     enable_search: true         #允许在调用llm之前搜索memory,会有200ms左右延迟  
     search_threshold: 0.5       #搜索阈值,0.5表示只有当搜索到的memory与用户输入的相似度超过0.5时,才会将其加入到llm的输入中
     search_top_k: 3             #搜索TopK,表示搜索到的memory中,相似度最高的TopK个memory会被加入到llm的输入中

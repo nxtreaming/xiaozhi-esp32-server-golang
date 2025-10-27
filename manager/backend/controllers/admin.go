@@ -51,6 +51,7 @@ func (ac *AdminController) GetDeviceConfigs(c *gin.Context) {
 		ASR     models.Config `json:"asr"`
 		LLM     models.Config `json:"llm"`
 		TTS     models.Config `json:"tts"`
+		Memory  models.Config `json:"memory"`
 		Prompt  string        `json:"prompt"`
 		AgentID string        `json:"agent_id"`
 	}
@@ -150,6 +151,12 @@ func (ac *AdminController) GetDeviceConfigs(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get default TTS config"})
 			return
 		}
+	}
+
+	// 获取Memory默认配置
+	if err := ac.DB.Where("type = ? AND is_default = ? AND enabled = ?", "memory", true, true).First(&response.Memory).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get default Memory config"})
+		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": response})
@@ -389,6 +396,15 @@ func (ac *AdminController) CreateConfig(c *gin.Context) {
 		return
 	}
 
+	// 检查是否已存在Memory配置
+	var existingCount int64
+	ac.DB.Model(&models.Config{}).Where("type = ?", "memory").Count(&existingCount)
+	
+	// 如果不存在任何Memory配置，自动设置为默认配置
+	if existingCount == 0 {
+		config.IsDefault = true
+	}
+	
 	// 如果设置为默认配置，先取消其他同类型的默认配置
 	if config.IsDefault {
 		ac.DB.Model(&models.Config{}).Where("type = ? AND is_default = ?", config.Type, true).Update("is_default", false)
@@ -1462,6 +1478,7 @@ func (ac *AdminController) ExportConfigs(c *gin.Context) {
 		LLM        map[string]interface{} `yaml:"llm,omitempty"`
 		TTS        map[string]interface{} `yaml:"tts,omitempty"`
 		Vision     map[string]interface{} `yaml:"vision,omitempty"`
+		Memory     map[string]interface{} `yaml:"memory,omitempty"`
 		MQTT       map[string]interface{} `yaml:"mqtt,omitempty"`
 		MQTTServer map[string]interface{} `yaml:"mqtt_server,omitempty"`
 		UDP        map[string]interface{} `yaml:"udp,omitempty"`
@@ -1476,6 +1493,7 @@ func (ac *AdminController) ExportConfigs(c *gin.Context) {
 		LLM:        make(map[string]interface{}),
 		TTS:        make(map[string]interface{}),
 		Vision:     make(map[string]interface{}),
+		Memory:     make(map[string]interface{}),
 		MQTT:       make(map[string]interface{}),
 		MQTTServer: make(map[string]interface{}),
 		UDP:        make(map[string]interface{}),
@@ -1569,6 +1587,11 @@ func (ac *AdminController) ExportConfigs(c *gin.Context) {
 			for key, value := range jsonData {
 				exportConfig.UDP[key] = value
 			}
+		case "memory":
+			if config.IsDefault {
+				exportConfig.Memory["provider"] = config.ConfigID
+			}
+			exportConfig.Memory[config.ConfigID] = jsonData
 		case "mcp":
 			// 处理MCP配置，将mcp和local_mcp分开
 			if mcpData, exists := jsonData["mcp"]; exists {
@@ -1685,7 +1708,7 @@ func (ac *AdminController) ImportConfigs(c *gin.Context) {
 	log.Printf("全局角色清空成功，删除了 %d 条记录", result2.RowsAffected)
 
 	// 导入配置 - 只处理实际存在的模块
-	configTypes := []string{"vad", "asr", "llm", "tts", "ota", "mqtt", "mqtt_server", "udp", "mcp", "local_mcp"}
+	configTypes := []string{"vad", "asr", "llm", "tts", "memory", "ota", "mqtt", "mqtt_server", "udp", "mcp", "local_mcp"}
 	log.Printf("开始导入配置，配置类型: %v", configTypes)
 
 	for _, configType := range configTypes {
@@ -1693,8 +1716,8 @@ func (ac *AdminController) ImportConfigs(c *gin.Context) {
 		if configData, exists := importConfig[configType]; exists {
 			log.Printf("找到配置类型 %s 的数据", configType)
 			if configMap, ok := configData.(map[string]interface{}); ok {
-				// 对于需要provider的模块（vad, asr, llm, tts），处理provider字段
-				if configType == "vad" || configType == "asr" || configType == "llm" || configType == "tts" {
+				// 对于需要provider的模块（vad, asr, llm, tts, memory），处理provider字段
+				if configType == "vad" || configType == "asr" || configType == "llm" || configType == "tts" || configType == "memory" {
 					log.Printf("处理需要provider的配置类型: %s", configType)
 					// 获取provider字段
 					var defaultProvider string
@@ -2199,6 +2222,130 @@ func GenerateAgentMCPEndpoint(db *gorm.DB, agentID string, userID uint) (string,
 	endpointWithToken := fmt.Sprintf("%s/mcp?token=%s", baseURL, token)
 
 	return endpointWithToken, nil
+}
+
+// Memory配置管理
+func (ac *AdminController) GetMemoryConfigs(c *gin.Context) {
+	var configs []models.Config
+	if err := ac.DB.Where("type = ?", "memory").Find(&configs).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取Memory配置列表失败"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": configs})
+}
+
+func (ac *AdminController) CreateMemoryConfig(c *gin.Context) {
+	var config models.Config
+	if err := c.ShouldBindJSON(&config); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 设置配置类型为memory
+	config.Type = "memory"
+
+	// 验证provider字段
+	if config.Provider != "memobase" && config.Provider != "mem0" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Provider必须是memobase或mem0"})
+		return
+	}
+
+	// 检查是否已存在Memory配置，如果不存在则自动设置为默认配置
+	var existingCount int64
+	if err := ac.DB.Model(&models.Config{}).Where("type = ?", "memory").Count(&existingCount).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "检查Memory配置失败"})
+		return
+	}
+	
+	// 如果这是第一个Memory配置，自动设置为默认配置
+	if existingCount == 0 {
+		config.IsDefault = true
+	}
+
+	// 如果设置为默认配置，先取消其他同类型的默认配置
+	if config.IsDefault {
+		ac.DB.Model(&models.Config{}).Where("type = ? AND is_default = ?", config.Type, true).Update("is_default", false)
+	}
+
+	if err := ac.DB.Create(&config).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建Memory配置失败"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{"data": config})
+}
+
+func (ac *AdminController) UpdateMemoryConfig(c *gin.Context) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	var config models.Config
+
+	if err := ac.DB.Where("id = ? AND type = ?", id, "memory").First(&config).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Memory配置不存在"})
+		return
+	}
+
+	var updateData models.Config
+	if err := c.ShouldBindJSON(&updateData); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 验证provider字段
+	if updateData.Provider != "memobase" && updateData.Provider != "mem0" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Provider必须是memobase或mem0"})
+		return
+	}
+
+	// 如果设置为默认配置，先取消其他同类型的默认配置
+	if updateData.IsDefault {
+		ac.DB.Model(&models.Config{}).Where("type = ? AND is_default = ? AND id != ?", config.Type, true, id).Update("is_default", false)
+	}
+
+	// 更新配置
+	config.Name = updateData.Name
+	config.Provider = updateData.Provider
+	config.JsonData = updateData.JsonData
+	config.Enabled = updateData.Enabled
+	config.IsDefault = updateData.IsDefault
+
+	if err := ac.DB.Save(&config).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新Memory配置失败"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": config})
+}
+
+func (ac *AdminController) DeleteMemoryConfig(c *gin.Context) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	if err := ac.DB.Where("id = ? AND type = ?", id, "memory").Delete(&models.Config{}).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "删除Memory配置失败"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "删除成功"})
+}
+
+// 设置默认Memory配置
+func (ac *AdminController) SetDefaultMemoryConfig(c *gin.Context) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	var config models.Config
+
+	if err := ac.DB.Where("id = ? AND type = ?", id, "memory").First(&config).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Memory配置不存在"})
+		return
+	}
+
+	// 先取消其他同类型的默认配置
+	ac.DB.Model(&models.Config{}).Where("type = ? AND is_default = ?", config.Type, true).Update("is_default", false)
+
+	// 设置当前配置为默认
+	config.IsDefault = true
+	if err := ac.DB.Save(&config).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "设置默认Memory配置失败"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "设置默认Memory配置成功", "data": config})
 }
 
 // generateMCPToken 生成包含智能体ID、用户ID和签发时间的JWT Token

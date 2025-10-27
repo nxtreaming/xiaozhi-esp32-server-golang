@@ -155,6 +155,13 @@ func Setup(db *gorm.DB) *gin.Engine {
 				admin.PUT("/mcp-configs/:id", adminController.UpdateMCPConfig)
 				admin.DELETE("/mcp-configs/:id", adminController.DeleteMCPConfig)
 
+				// Memory配置管理
+				admin.GET("/memory-configs", adminController.GetMemoryConfigs)
+				admin.POST("/memory-configs", adminController.CreateMemoryConfig)
+				admin.PUT("/memory-configs/:id", adminController.UpdateMemoryConfig)
+				admin.DELETE("/memory-configs/:id", adminController.DeleteMemoryConfig)
+				admin.POST("/memory-configs/:id/set-default", adminController.SetDefaultMemoryConfig)
+
 				// 全局角色管理
 				admin.GET("/global-roles", adminController.GetGlobalRoles)
 				admin.POST("/global-roles", adminController.CreateGlobalRole)

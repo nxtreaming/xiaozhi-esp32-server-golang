@@ -100,6 +100,12 @@ const routes = [
             component: () => import('../views/admin/MCPConfig.vue'),
             meta: { title: 'MCP配置管理' }
           },
+          {
+            path: 'memory-config',
+            name: 'MemoryConfig',
+            component: () => import('../views/admin/MemoryConfig.vue'),
+            meta: { title: 'Memory配置管理' }
+          },
           		{
 			path: 'vision-config',
 			name: 'VisionConfig',

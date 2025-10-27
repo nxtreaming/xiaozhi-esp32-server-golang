@@ -9,7 +9,6 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"github.com/hackers365/mem0-go/client"
 	"github.com/hackers365/mem0-go/types"
-	"github.com/spf13/viper"
 
 	log "xiaozhi-esp32-server-golang/logger"
 )
@@ -27,7 +26,7 @@ type Mem0Client struct {
 // Mem0Config 配置结构
 type Mem0Config struct {
 	APIKey           string `mapstructure:"api_key"`
-	Host             string `mapstructure:"host"`
+	BaseUrl          string `mapstructure:"base_url"`
 	OrganizationName string `mapstructure:"organization_name"`
 	ProjectName      string `mapstructure:"project_name"`
 	OrganizationID   string `mapstructure:"organization_id"`
@@ -39,15 +38,6 @@ var (
 	mem0Once     sync.Once
 	configOnce   sync.Once
 )
-
-// GetMem0Client 获取 Mem0 客户端单例
-func GetMem0Client() (*Mem0Client, error) {
-	var err error
-	mem0Once.Do(func() {
-		mem0Instance, err = newMem0Client()
-	})
-	return mem0Instance, err
-}
 
 // GetMem0ClientWithConfig 使用配置获取 Mem0 客户端单例
 func GetMem0ClientWithConfig(config map[string]interface{}) (*Mem0Client, error) {
@@ -88,9 +78,9 @@ func GetMem0ClientWithConfig(config map[string]interface{}) (*Mem0Client, error)
 		}
 
 		// 读取 Host
-		if hostInterface, exists := config["host"]; exists {
+		if hostInterface, exists := config["base_url"]; exists {
 			if host, ok := hostInterface.(string); ok {
-				mem0Cfg.Host = host
+				mem0Cfg.BaseUrl = host
 			} else {
 				err = fmt.Errorf("mem0.host 必须是字符串")
 				return
@@ -104,8 +94,8 @@ func GetMem0ClientWithConfig(config map[string]interface{}) (*Mem0Client, error)
 		}
 
 		// 设置默认值
-		if mem0Cfg.Host == "" {
-			mem0Cfg.Host = "https://api.mem0.ai"
+		if mem0Cfg.BaseUrl == "" {
+			mem0Cfg.BaseUrl = "https://api.mem0.ai"
 		}
 
 		// 创建 mem0 客户端
@@ -132,117 +122,10 @@ func GetMem0ClientWithConfig(config map[string]interface{}) (*Mem0Client, error)
 			SearchTopk:      searchTopk,
 		}
 
-		log.Log().Infof("Mem0 客户端初始化成功, host: %s", mem0Cfg.Host)
+		log.Log().Infof("Mem0 客户端初始化成功, base_url: %s", mem0Cfg.BaseUrl)
 	})
 
 	return mem0Instance, err
-}
-
-// NewWithConfig 使用配置创建新的Mem0客户端实例
-func NewWithConfig(config map[string]interface{}) (*Mem0Client, error) {
-	// 从配置中读取 mem0 相关配置
-	mem0Config, ok := config["mem0"]
-	if !ok {
-		return nil, fmt.Errorf("mem0 配置不存在")
-	}
-
-	configMap, ok := mem0Config.(map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("mem0 配置格式错误")
-	}
-
-	// 解析配置到结构体
-	var mem0Cfg Mem0Config
-
-	// 读取 API Key
-	if apiKeyInterface, exists := configMap["api_key"]; exists {
-		if apiKey, ok := apiKeyInterface.(string); ok {
-			mem0Cfg.APIKey = apiKey
-		} else {
-			return nil, fmt.Errorf("mem0.api_key 必须是字符串")
-		}
-	}
-
-	// 读取 Host
-	if hostInterface, exists := configMap["host"]; exists {
-		if host, ok := hostInterface.(string); ok {
-			mem0Cfg.Host = host
-		} else {
-			return nil, fmt.Errorf("mem0.host 必须是字符串")
-		}
-	}
-
-	// 验证必要配置
-	if mem0Cfg.APIKey == "" {
-		return nil, fmt.Errorf("mem0.api_key 配置缺失或为空")
-	}
-
-	// 设置默认值
-	if mem0Cfg.Host == "" {
-		mem0Cfg.Host = "https://api.mem0.ai"
-	}
-
-	// 创建 mem0 客户端
-	clientOptions := client.ClientOptions{
-		APIKey:           mem0Cfg.APIKey,
-		Host:             mem0Cfg.Host,
-		OrganizationName: mem0Cfg.OrganizationName,
-		ProjectName:      mem0Cfg.ProjectName,
-		OrganizationID:   mem0Cfg.OrganizationID,
-		ProjectID:        mem0Cfg.ProjectID,
-	}
-
-	mem0Client, err := client.NewMemoryClient(clientOptions)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create mem0 client: %w", err)
-	}
-
-	mem0ClientInstance := &Mem0Client{
-		client: mem0Client,
-		config: mem0Cfg,
-	}
-
-	log.Log().Infof("Mem0 客户端初始化成功, host: %s", mem0Cfg.Host)
-	return mem0ClientInstance, nil
-}
-
-// newMem0Client 创建新的 Mem0 客户端
-func newMem0Client() (*Mem0Client, error) {
-	// 读取配置
-	var config Mem0Config
-	if err := viper.UnmarshalKey("memory.mem0", &config); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal mem0 config: %w", err)
-	}
-
-	// 验证必要配置
-	if config.APIKey == "" {
-		return nil, fmt.Errorf("mem0 api_key is required")
-	}
-
-	// 设置默认值
-	if config.Host == "" {
-		config.Host = "https://api.mem0.ai"
-	}
-
-	// 创建 mem0 客户端
-	clientOptions := client.ClientOptions{
-		APIKey:           config.APIKey,
-		Host:             config.Host,
-		OrganizationName: config.OrganizationName,
-		ProjectName:      config.ProjectName,
-		OrganizationID:   config.OrganizationID,
-		ProjectID:        config.ProjectID,
-	}
-
-	mem0Client, err := client.NewMemoryClient(clientOptions)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create mem0 client: %w", err)
-	}
-
-	return &Mem0Client{
-		client: mem0Client,
-		config: config,
-	}, nil
 }
 
 // Init 初始化客户端
@@ -368,7 +251,7 @@ func (m *Mem0Client) Search(ctx context.Context, agentId string, query string, t
 	// 构建上下文字符串
 	var msgList []string
 	for _, result := range results {
-		msgList = append(msgList, fmt.Sprintf("- %s", result.Memory))
+		msgList = append(msgList, fmt.Sprintf("- %s [%s]", result.Memory, result.CreatedAt))
 	}
 
 	return strings.Join(msgList, "\n"), nil
