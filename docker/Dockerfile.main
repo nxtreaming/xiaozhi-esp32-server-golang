@@ -1,5 +1,5 @@
 # 构建阶段
-FROM golang:1.23 AS builder
+FROM golang:1.24.4 AS builder
 
 # 设置非交互式安装环境变量
 ENV DEBIAN_FRONTEND=noninteractive
@@ -39,6 +39,9 @@ ENV CGO_ENABLED=1
 # 创建工作目录并复制源代码
 WORKDIR /app
 COPY . .
+
+# 下载Go模块
+RUN go mod tidy
 
 # 构建主程序
 RUN go build -o /app/xiaozhi_server ./cmd/server/

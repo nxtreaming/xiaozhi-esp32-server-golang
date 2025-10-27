@@ -587,10 +587,14 @@ func (s *ChatSession) OnListenStart() error {
 			default:
 			}
 
-			text, err := s.clientState.RetireAsrResult(ctx)
+			text, isRetry, err := s.clientState.RetireAsrResult(ctx)
 			if err != nil {
 				log.Errorf("处理asr结果失败: %v", err)
 				s.Close()
+				return
+			}
+			if !isRetry {
+				log.Debugf("asrResult is not retry, return")
 				return
 			}
 

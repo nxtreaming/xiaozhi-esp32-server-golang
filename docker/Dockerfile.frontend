@@ -1,5 +1,5 @@
 # 构建阶段
-FROM docker.jsdelivr.fyi/node:18-alpine AS builder
+FROM node:18-alpine AS builder
 
 WORKDIR /app
 
@@ -16,7 +16,7 @@ RUN npm run build
 RUN ls -a 
 
 # 运行阶段
-FROM docker.jsdelivr.fyi/nginx:alpine
+FROM nginx:alpine
 
 # 复制构建结果
 COPY --from=builder /app/dist /usr/share/nginx/html

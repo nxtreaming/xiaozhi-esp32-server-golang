@@ -3,7 +3,6 @@ package client
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"sync"
 	"xiaozhi-esp32-server-golang/internal/domain/asr"
 	asr_types "xiaozhi-esp32-server-golang/internal/domain/asr/types"
@@ -28,27 +27,27 @@ func (a *Asr) Reset() {
 	a.AsrResult.Reset()
 }
 
-func (a *Asr) RetireAsrResult(ctx context.Context) (string, error) {
+func (a *Asr) RetireAsrResult(ctx context.Context) (string, bool, error) {
 	defer func() {
 		a.Reset()
 	}()
 	for {
 		select {
 		case <-ctx.Done():
-			return "", fmt.Errorf("RetireAsrResult ctx Done")
+			return "", false, nil
 		case result, ok := <-a.AsrResultChannel:
 			log.Debugf("asr result: %s, ok: %+v, isFinal: %+v, error: %+v", result.Text, ok, result.IsFinal, result.Error)
 			if result.Error != nil {
-				return "", result.Error
+				return "", false, result.Error
 			}
 			a.AsrResult.WriteString(result.Text)
 			if a.AutoEnd || result.IsFinal {
 				text := a.AsrResult.String()
-				return text, nil
+				return text, true, nil
 			}
 			if !ok {
 				log.Debugf("asr result channel closed")
-				return "", nil
+				return "", true, nil
 			}
 		}
 	}

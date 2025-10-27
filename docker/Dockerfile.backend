@@ -1,5 +1,5 @@
 # 构建阶段
-FROM docker.jsdelivr.fyi/golang:1.21-alpine AS builder
+FROM golang:1.21-alpine AS builder
 
 WORKDIR /app
 
@@ -8,10 +8,11 @@ RUN apk add --no-cache git ca-certificates tzdata
 
 # 复制go mod文件
 COPY manager/backend/go.mod manager/backend/go.sum ./
-RUN go mod download
 
 # 复制源代码
 COPY manager/backend/ .
+
+RUN go mod tidy
 
 # 构建应用
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
