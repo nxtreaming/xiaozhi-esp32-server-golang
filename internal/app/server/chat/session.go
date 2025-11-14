@@ -606,12 +606,12 @@ func (s *ChatSession) OnListenStart() error {
 
 			if text != "" {
 				//如果是realtime模式下，需要停止 当前的llm和tts
-				if s.clientState.IsRealTime() {
+				if s.clientState.IsRealTime() && viper.GetInt("chat.realtime_mode") == 2 {
 					s.clientState.AfterAsrSessionCtx.Cancel()
 				}
 
 				// 重置重试计数器
-				startIdleTime = 0
+				startIdleTime = time.Now().Unix()
 
 				//当获取到asr结果时, 结束语音输入
 				s.clientState.OnVoiceSilence()

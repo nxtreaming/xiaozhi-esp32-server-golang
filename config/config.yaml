@@ -13,6 +13,7 @@ auth:
 chat:
   max_idle_duration: 30000         # 最大空闲时间（毫秒）
   chat_max_silence_duration: 200   # 由 有声音 转到 静音的阈值时间，决定响应快慢 （毫秒）
+  realtime_mode: 1 # 1: vad打断模式 2: asr打断模式
 
 config_provider:          #对应domain/config/中的provider
   type: "manager"         #现在可以是 manager, redis

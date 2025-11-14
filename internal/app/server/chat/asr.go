@@ -7,6 +7,8 @@ import (
 	. "xiaozhi-esp32-server-golang/internal/data/client"
 	"xiaozhi-esp32-server-golang/internal/domain/audio"
 	log "xiaozhi-esp32-server-golang/logger"
+
+	"github.com/spf13/viper"
 )
 
 type ASRManagerOption func(*ASRManager)
@@ -109,10 +111,6 @@ func (a *ASRManager) ProcessVadAudio(ctx context.Context, onClose func()) {
 						}
 						//首次触发识别到语音时,为了语音数据完整性 将vadPcmData赋值给pcmData, 之后的音频数据全部进入asr
 						if haveVoice && !clientHaveVoice {
-							if state.IsRealTime() {
-								//realtime模式下, 如果此时有正在进行的llm和tts则取消掉
-								state.AfterAsrSessionCtx.Cancel()
-							}
 							//首次获取全部pcm数据送入asr
 							pcmData = state.AsrAudioBuffer.GetAndClearAllData()
 						}
@@ -139,7 +137,19 @@ func (a *ASRManager) ProcessVadAudio(ctx context.Context, onClose func()) {
 					if !state.Asr.AutoEnd {
 						state.Vad.ResetIdleDuration()
 					}
+					// 累积检测到声音的时长
+					state.Vad.AddVoiceDuration(int64(audioFormat.FrameDuration))
+
+					voiceDuration := state.Vad.GetVoiceDuration()
+					log.Debugf("voiceDuration: %d", voiceDuration)
+					if state.IsRealTime() && viper.GetInt("chat.realtime_mode") == 1 && voiceDuration > 120 {
+						//realtime模式下, 如果此时有正在进行的llm和tts则取消掉
+						log.Debugf("realtime模式vad打断下 && 语音时长超过%d ms 如果此时有正在进行的llm和tts则取消掉", voiceDuration)
+						state.AfterAsrSessionCtx.Cancel()
+					}
 				} else {
+					// 没有声音时，重置累积的声音时长
+					state.Vad.ResetVoiceDuration()
 					//如果之前没有语音, 本次也没有语音, 则从缓存中删除
 					if !clientHaveVoice {
 						//保留近10帧
