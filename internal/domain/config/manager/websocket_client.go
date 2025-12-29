@@ -28,6 +28,7 @@ type WebSocketClient struct {
 	callbacks      map[string]func(*WebSocketResponse)
 	requestHandler func(*WebSocketRequest) // 处理收到的请求
 	mu             sync.RWMutex
+	writeMu        sync.Mutex // 保护WebSocket写入操作，防止并发写入
 	isConnected    bool
 	connectMu      sync.Mutex
 	messageQueue   chan *WebSocketRequest
@@ -190,8 +191,11 @@ func (c *WebSocketClient) SendRequest(ctx context.Context, method, path string, 
 		close(responseChan)
 	}()
 
-	// 发送请求
-	if err := c.conn.WriteJSON(request); err != nil {
+	// 发送请求（使用写入锁保护）
+	c.writeMu.Lock()
+	err := c.conn.WriteJSON(request)
+	c.writeMu.Unlock()
+	if err != nil {
 		return nil, fmt.Errorf("发送请求失败: %v", err)
 	}
 
@@ -211,6 +215,8 @@ func (c *WebSocketClient) Ping() error {
 	if !c.IsConnected() {
 		return fmt.Errorf("WebSocket未连接")
 	}
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
 	return c.conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(10*time.Second))
 }
 
@@ -274,8 +280,11 @@ func (c *WebSocketClient) startWorkers() {
 					continue
 				}
 
-				// 发送请求
-				if err := c.conn.WriteJSON(request); err != nil {
+				// 发送请求（使用写入锁保护）
+				c.writeMu.Lock()
+				err := c.conn.WriteJSON(request)
+				c.writeMu.Unlock()
+				if err != nil {
 					log.Debugf("工作线程 %d: 发送请求失败: %v", workerID, err)
 					// 连接可能已断开，触发重连
 					go c.handleConnectionError()
@@ -436,9 +445,12 @@ func (c *WebSocketClient) handleMessages() {
 			}
 
 		case websocket.PingMessage:
-			// 处理ping消息，自动回复pong
+			// 处理ping消息，自动回复pong（使用写入锁保护）
 			log.Debugf("收到ping消息，自动回复pong")
-			if err := c.conn.WriteControl(websocket.PongMessage, []byte{}, time.Now().Add(10*time.Second)); err != nil {
+			c.writeMu.Lock()
+			err := c.conn.WriteControl(websocket.PongMessage, []byte{}, time.Now().Add(10*time.Second))
+			c.writeMu.Unlock()
+			if err != nil {
 				log.Errorf("发送pong失败: %v", err)
 			}
 
@@ -591,7 +603,11 @@ func (c *WebSocketClient) SendResponse(requestID string, status int, body map[st
 		Error:  errorMsg,
 	}
 
-	if err := c.conn.WriteJSON(response); err != nil {
+	// 使用写入锁保护
+	c.writeMu.Lock()
+	err := c.conn.WriteJSON(response)
+	c.writeMu.Unlock()
+	if err != nil {
 		return fmt.Errorf("发送响应失败: %v", err)
 	}
 

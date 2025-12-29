@@ -156,7 +156,7 @@ func (c *ChatSession) CmdMessageLoop(ctx context.Context) {
 		recvFailCount = 0
 		log.Infof("收到文本消息: %s", string(message))
 		if err := c.HandleTextMessage(message); err != nil {
-			log.Errorf("处理文本消息失败: %v", err)
+			log.Errorf("处理文本消息失败: %v, 消息内容: %s", err, string(message))
 			continue
 		}
 	}
