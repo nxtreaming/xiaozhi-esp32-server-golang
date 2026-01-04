@@ -482,8 +482,8 @@ const getAudioUrl = async (messageId) => {
     
     return blobUrl
   } catch (error) {
-    console.error('加载音频失败:', error)
-    ElMessage.error('加载音频失败: ' + (error.response?.data?.error || error.message))
+    // 静默处理，只记录日志，不显示错误提示
+    console.warn('加载音频失败:', messageId, error)
     return null
   }
 }
@@ -507,7 +507,8 @@ const handleAudioEnded = (messageId) => {
 
 // 音频加载错误处理
 const handleAudioError = async (messageId) => {
-  console.error('音频加载失败:', messageId)
+  // 静默处理，只记录日志，不显示错误提示
+  console.warn('音频加载失败:', messageId)
   // 尝试重新加载
   try {
     const url = await getAudioUrl(messageId)
@@ -518,7 +519,8 @@ const handleAudioError = async (messageId) => {
       }
     }
   } catch (error) {
-    ElMessage.error('音频加载失败')
+    // 静默处理，只记录日志
+    console.warn('音频重新加载失败:', messageId, error)
   }
 }
 
@@ -531,7 +533,8 @@ const toggleAudio = async (messageId) => {
   if (!audioBlobUrls.value[messageId]) {
     const url = await getAudioUrl(messageId)
     if (!url) {
-      ElMessage.error('音频加载失败')
+      // 静默处理，只记录日志，不显示错误提示
+      console.warn('音频加载失败，无法播放:', messageId)
       return
     }
     // 等待音频元素加载
@@ -560,8 +563,8 @@ const toggleAudio = async (messageId) => {
       await audio.play()
       playingAudioId.value = messageId
     } catch (error) {
-      console.error('播放音频失败:', error)
-      ElMessage.error('播放音频失败')
+      // 静默处理，只记录日志，不显示错误提示
+      console.warn('播放音频失败:', messageId, error)
     }
   }
 }

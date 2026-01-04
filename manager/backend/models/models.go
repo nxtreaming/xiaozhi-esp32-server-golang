@@ -76,7 +76,7 @@ type GlobalRole struct {
 // ChatMessage 聊天消息模型
 type ChatMessage struct {
 	ID        uint      `json:"id" gorm:"primarykey"`
-	MessageID string    `json:"message_id" gorm:"type:varchar(64);uniqueIndex;not null"`
+	MessageID string    `json:"message_id" gorm:"type:varchar(64);uniqueIndex:idx_chat_messages_message_id;not null"`
 
 	// 关联信息（不使用外键）
 	DeviceID  string    `json:"device_id" gorm:"type:varchar(100);index:idx_device_id;not null"`
