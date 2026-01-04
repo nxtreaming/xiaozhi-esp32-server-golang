@@ -153,6 +153,25 @@ func (ac *AdminController) GetDeviceConfigs(c *gin.Context) {
 		}
 	}
 
+	// 如果Agent有Voice字段，更新TTS配置的json_data中的voice字段
+	if deviceFound && agent.ID != 0 && agent.Voice != nil && *agent.Voice != "" {
+		var ttsConfigData map[string]interface{}
+		if err := json.Unmarshal([]byte(response.TTS.JsonData), &ttsConfigData); err == nil {
+			// 根据provider更新对应的voice字段
+			// edge, doubao, doubao_ws, microsoft 使用 voice 字段
+			// cosyvoice 使用 spk_id 字段
+			if response.TTS.Provider == "cosyvoice" {
+				ttsConfigData["spk_id"] = *agent.Voice
+			} else {
+				ttsConfigData["voice"] = *agent.Voice
+			}
+			// 重新序列化json_data
+			if updatedJsonData, err := json.Marshal(ttsConfigData); err == nil {
+				response.TTS.JsonData = string(updatedJsonData)
+			}
+		}
+	}
+
 	// 获取Memory默认配置
 	if err := ac.DB.Where("type = ? AND is_default = ? AND enabled = ?", "memory", true, true).First(&response.Memory).Error; err != nil {
 		//c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get default Memory config"})

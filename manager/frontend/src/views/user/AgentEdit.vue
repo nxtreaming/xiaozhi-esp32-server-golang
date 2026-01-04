@@ -86,6 +86,7 @@
               size="large" 
               style="width: 100%"
               clearable
+              @change="handleTtsConfigChange"
             >
               <el-option
                 v-for="ttsConfig in ttsConfigs"
@@ -104,6 +105,36 @@
             </el-select>
             <div class="form-help" v-if="getCurrentTtsConfigName()">
               {{ getCurrentTtsConfigInfo() }}
+            </div>
+          </div>
+
+          <div class="form-group" v-if="form.tts_config_id">
+            <label class="form-label">音色</label>
+            <el-select 
+              v-model="form.voice" 
+              placeholder="请选择或输入音色（支持搜索和自定义输入）" 
+              size="large" 
+              style="width: 100%"
+              filterable
+              allow-create
+              default-first-option
+              reserve-keyword
+              clearable
+              :loading="voiceLoading"
+              :filter-method="filterVoice"
+            >
+              <el-option
+                v-for="voice in filteredVoices"
+                :key="voice.value"
+                :label="voice.label"
+                :value="voice.value"
+              >
+                <span>{{ voice.label }}</span>
+                <span style="color: #8492a6; font-size: 13px; margin-left: 8px;">{{ voice.value }}</span>
+              </el-option>
+            </el-select>
+            <div class="form-help">
+              当前TTS配置: {{ getCurrentTtsConfigName() }}，可以搜索音色名称或值，也可以手动输入自定义音色值。
             </div>
           </div>
 
@@ -229,6 +260,7 @@ const form = reactive({
   custom_prompt: '',
   llm_config_id: null,
   tts_config_id: null,
+  voice: null,
   asr_speed: 'normal'
 })
 
@@ -240,6 +272,13 @@ const llmConfigs = ref([])
 
 // TTS配置数据
 const ttsConfigs = ref([])
+
+// 音色相关数据
+const availableVoices = ref([])
+const filteredVoices = ref([])
+const voiceSearchKeyword = ref('')
+const voiceLoading = ref(false)
+const previousTtsConfigId = ref(null) // 用于跟踪TTS配置变化
 
 // MCP接入点相关
 const showMCPDialog = ref(false)
@@ -284,7 +323,8 @@ const loadAgent = async () => {
     Object.assign(form, {
       name: agent.name || '',
       custom_prompt: agent.custom_prompt || '',
-      asr_speed: agent.asr_speed || 'normal'
+      asr_speed: agent.asr_speed || 'normal',
+      voice: agent.voice || null
     })
     
     // 处理LLM配置关联
@@ -494,6 +534,91 @@ const copyMCPEndpoint = async () => {
   }
 }
 
+// 处理TTS配置变化，加载对应的音色列表
+const handleTtsConfigChange = async () => {
+  // 获取之前的provider（如果有）
+  let previousProvider = null
+  if (previousTtsConfigId.value) {
+    const prevConfig = ttsConfigs.value.find(config => config.config_id === previousTtsConfigId.value)
+    previousProvider = prevConfig?.provider
+  }
+  
+  if (!form.tts_config_id) {
+    availableVoices.value = []
+    filteredVoices.value = []
+    form.voice = null // 清空音色
+    previousTtsConfigId.value = null
+    return
+  }
+  
+  // 获取当前TTS配置的provider
+  const ttsConfig = ttsConfigs.value.find(config => config.config_id === form.tts_config_id)
+  if (!ttsConfig || !ttsConfig.provider) {
+    availableVoices.value = []
+    filteredVoices.value = []
+    form.voice = null // 清空音色
+    previousTtsConfigId.value = form.tts_config_id
+    return
+  }
+  
+  // 如果provider发生变化，清空当前的voice值
+  if (previousProvider && previousProvider !== ttsConfig.provider) {
+    form.voice = null
+  }
+  
+  // 加载音色列表
+  await loadVoices(ttsConfig.provider)
+  
+  // 如果当前voice值在新列表中不存在，也清空它
+  if (form.voice && availableVoices.value.length > 0) {
+    const voiceExists = availableVoices.value.some(v => v.value === form.voice)
+    if (!voiceExists) {
+      form.voice = null
+    }
+  }
+  
+  // 更新previousTtsConfigId
+  previousTtsConfigId.value = form.tts_config_id
+}
+
+// 音色搜索过滤函数
+const filterVoice = (val) => {
+  voiceSearchKeyword.value = val
+  if (!val) {
+    filteredVoices.value = availableVoices.value
+    return
+  }
+  
+  const keyword = val.toLowerCase()
+  filteredVoices.value = availableVoices.value.filter(voice => {
+    // 同时搜索 label 和 value
+    return voice.label.toLowerCase().includes(keyword) || 
+           voice.value.toLowerCase().includes(keyword)
+  })
+}
+
+// 加载音色列表
+const loadVoices = async (provider) => {
+  if (!provider) {
+    availableVoices.value = []
+    filteredVoices.value = []
+    return
+  }
+  
+  voiceLoading.value = true
+  try {
+    const response = await api.get(`/user/voice-options?provider=${provider}`)
+    availableVoices.value = response.data.data || []
+    filteredVoices.value = availableVoices.value
+  } catch (error) {
+    console.error('加载音色列表失败:', error)
+    availableVoices.value = []
+    filteredVoices.value = []
+  } finally {
+    voiceLoading.value = false
+  }
+}
+
 onMounted(async () => {
   // 先加载配置数据
   await Promise.all([
@@ -504,9 +629,21 @@ onMounted(async () => {
   if (route.params.id) {
     // 编辑现有智能体，加载智能体数据
     await loadAgent()
+    // 如果已有TTS配置，加载对应的音色列表
+    if (form.tts_config_id) {
+      previousTtsConfigId.value = form.tts_config_id
+      const ttsConfig = ttsConfigs.value.find(config => config.config_id === form.tts_config_id)
+      if (ttsConfig && ttsConfig.provider) {
+        await loadVoices(ttsConfig.provider)
+      }
+    }
   } else {
     // 新建智能体，自动选择默认配置
     autoSelectDefaultConfigs()
+    // 如果自动选择了TTS配置，记录它
+    if (form.tts_config_id) {
+      previousTtsConfigId.value = form.tts_config_id
+    }
   }
 })
 </script>

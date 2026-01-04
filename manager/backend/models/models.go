@@ -38,6 +38,7 @@ type Agent struct {
 	CustomPrompt string    `json:"custom_prompt" gorm:"type:text"`                     // 角色介绍(prompt)
 	LLMConfigID  *string   `json:"llm_config_id" gorm:"type:varchar(100)"`             // 语言模型配置ID
 	TTSConfigID  *string   `json:"tts_config_id" gorm:"type:varchar(100)"`             // 音色配置ID
+	Voice        *string   `json:"voice" gorm:"type:varchar(200)"`                     // 音色值
 	ASRSpeed     string    `json:"asr_speed" gorm:"type:varchar(20);default:'normal'"` // 语音识别速度: normal/patient/fast
 	Status       string    `json:"status" gorm:"type:varchar(20);default:'active'"`    // active, inactive
 	CreatedAt    time.Time `json:"created_at"`

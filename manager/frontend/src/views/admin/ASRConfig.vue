@@ -111,7 +111,30 @@
           </el-form-item>
           
           <el-form-item label="块大小" prop="funasr.chunk_size">
-            <el-input-number v-model="form.funasr.chunk_size" :min="1" style="width: 100%" />
+            <div style="display: flex; gap: 8px; width: 100%">
+              <el-input-number 
+                v-model="form.funasr.chunk_size[0]" 
+                :min="1" 
+                placeholder="前向块大小"
+                style="flex: 1"
+              />
+              <el-input-number 
+                v-model="form.funasr.chunk_size[1]" 
+                :min="1" 
+                placeholder="中间块大小"
+                style="flex: 1"
+              />
+              <el-input-number 
+                v-model="form.funasr.chunk_size[2]" 
+                :min="1" 
+                placeholder="后向块大小"
+                style="flex: 1"
+              />
+            </div>
+            <div class="form-tip">
+              <el-icon><InfoFilled /></el-icon>
+              格式：[前向, 中间, 后向]，例如：[5, 10, 5]
+            </div>
           </el-form-item>
           
           <el-form-item label="块间隔" prop="funasr.chunk_interval">
@@ -213,7 +236,7 @@ const form = reactive({
     port: 10095,
     mode: 'offline',
     sample_rate: 16000,
-    chunk_size: 60,
+    chunk_size: [5, 10, 5],
     chunk_interval: 10,
     max_connections: 100,
     timeout: 30,
@@ -290,13 +313,27 @@ const editConfig = (config) => {
     // 兼容新旧格式：检查是否是包装格式（包含provider层）还是直接格式
     if (configObj.funasr) {
       // 旧格式：包含provider层
-      form.funasr = { ...form.funasr, ...configObj.funasr }
+      const funasrConfig = { ...form.funasr, ...configObj.funasr }
+      // 兼容chunk_size：如果是单个数字或无效格式，转换为默认值 [5, 10, 5]
+      if (typeof funasrConfig.chunk_size === 'number') {
+        funasrConfig.chunk_size = [5, 10, 5]
+      } else if (!Array.isArray(funasrConfig.chunk_size) || funasrConfig.chunk_size.length !== 3) {
+        funasrConfig.chunk_size = [5, 10, 5]
+      }
+      form.funasr = funasrConfig
     } else if (configObj.doubao) {
       // 旧格式：包含provider层
       form.doubao = { ...form.doubao, ...configObj.doubao }
     } else if (config.provider === 'funasr' && configObj.host) {
       // 新格式：直接包含配置内容
-      form.funasr = { ...form.funasr, ...configObj }
+      const funasrConfig = { ...form.funasr, ...configObj }
+      // 兼容chunk_size：如果是单个数字或无效格式，转换为默认值 [5, 10, 5]
+      if (typeof funasrConfig.chunk_size === 'number') {
+        funasrConfig.chunk_size = [5, 10, 5]
+      } else if (!Array.isArray(funasrConfig.chunk_size) || funasrConfig.chunk_size.length !== 3) {
+        funasrConfig.chunk_size = [5, 10, 5]
+      }
+      form.funasr = funasrConfig
     } else if (config.provider === 'doubao' && (configObj.appid || configObj.access_token)) {
       // 新格式：直接包含配置内容
       form.doubao = { ...form.doubao, ...configObj }
@@ -427,7 +464,7 @@ const resetForm = () => {
     port: 10095,
     mode: 'offline',
     sample_rate: 16000,
-    chunk_size: 60,
+    chunk_size: [5, 10, 5],
     chunk_interval: 10,
     max_connections: 100,
     timeout: 30,
