@@ -11,6 +11,7 @@ type Config struct {
 	Server   ServerConfig   `json:"server"`
 	Database DatabaseConfig `json:"database"`
 	JWT      JWTConfig      `json:"jwt"`
+	History  HistoryConfig  `json:"history"`
 }
 
 type ServerConfig struct {
@@ -29,6 +30,12 @@ type DatabaseConfig struct {
 type JWTConfig struct {
 	Secret     string `json:"secret"`
 	ExpireHour int    `json:"expire_hour"`
+}
+
+type HistoryConfig struct {
+	Enabled       bool   `json:"enabled"`
+	AudioBasePath string `json:"audio_base_path"` // 音频存储基础路径
+	MaxFileSize   int64  `json:"max_file_size"`   // 最大文件大小(字节)，默认10MB
 }
 
 func Load() *Config {
@@ -53,6 +60,11 @@ func LoadWithPath(configPath string) *Config {
 	}
 	if database := os.Getenv("DB_NAME"); database != "" {
 		config.Database.Database = database
+	}
+
+	// 优先使用环境变量覆盖音频存储路径
+	if audioBasePath := os.Getenv("AUDIO_BASE_PATH"); audioBasePath != "" {
+		config.History.AudioBasePath = audioBasePath
 	}
 
 	fmt.Println("config", config)

@@ -73,6 +73,7 @@
             <el-option label="豆包 WebSocket" value="doubao_ws" />
             <el-option label="Edge TTS" value="edge" />
             <el-option label="Edge 离线" value="edge_offline" />
+            <el-option label="OpenAI" value="openai" />
             <el-option label="小智 TTS" value="xiaozhi" />
           </el-select>
         </el-form-item>
@@ -198,6 +199,48 @@
           </el-form-item>
         </template>
 
+        <!-- OpenAI TTS 配置 -->
+        <template v-if="form.provider === 'openai'">
+          <el-form-item label="API Key" prop="openai.api_key">
+            <el-input v-model="form.openai.api_key" placeholder="请输入API Key" type="password" show-password />
+          </el-form-item>
+          <el-form-item label="API URL" prop="openai.api_url">
+            <el-input v-model="form.openai.api_url" placeholder="请输入API URL（默认：https://api.openai.com/v1/audio/speech）" />
+          </el-form-item>
+          <el-form-item label="模型" prop="openai.model">
+            <el-input v-model="form.openai.model" placeholder="请输入模型（默认：tts-1）" />
+          </el-form-item>
+          <el-form-item label="音色" prop="openai.voice">
+            <el-select v-model="form.openai.voice" placeholder="请选择音色" style="width: 100%">
+              <el-option label="alloy" value="alloy" />
+              <el-option label="echo" value="echo" />
+              <el-option label="fable" value="fable" />
+              <el-option label="onyx" value="onyx" />
+              <el-option label="nova" value="nova" />
+              <el-option label="shimmer" value="shimmer" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="响应格式" prop="openai.response_format">
+            <el-select v-model="form.openai.response_format" placeholder="请选择响应格式" style="width: 100%">
+              <el-option label="MP3" value="mp3" />
+              <el-option label="Opus" value="opus" />
+              <el-option label="AAC" value="aac" />
+              <el-option label="FLAC" value="flac" />
+              <el-option label="WAV" value="wav" />
+              <el-option label="PCM" value="pcm" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="语速" prop="openai.speed">
+            <el-input-number v-model="form.openai.speed" :min="0.25" :max="4.0" :step="0.1" style="width: 100%" placeholder="0.25-4.0，默认1.0" />
+          </el-form-item>
+          <el-form-item label="使用流式" prop="openai.stream">
+            <el-switch v-model="form.openai.stream" />
+          </el-form-item>
+          <el-form-item label="帧时长" prop="openai.frame_duration">
+            <el-input-number v-model="form.openai.frame_duration" :min="1" :max="1000" style="width: 100%" placeholder="毫秒" />
+          </el-form-item>
+        </template>
+
         <!-- 小智 TTS 配置 -->
         <template v-if="form.provider === 'xiaozhi'">
           <el-form-item label="服务器地址" prop="xiaozhi.server_addr">
@@ -283,6 +326,16 @@ const form = reactive({
     channels: 1,
     frame_duration: 20
   },
+  openai: {
+    api_key: '',
+    api_url: 'https://api.openai.com/v1/audio/speech',
+    model: 'tts-1',
+    voice: 'alloy',
+    response_format: 'mp3',
+    speed: 1.0,
+    stream: true,
+    frame_duration: 60
+  },
   xiaozhi: {
     server_addr: 'wss://api.tenclass.net/xiaozhi/v1/',
     device_id: 'ba:8f:17:de:94:94',
@@ -334,6 +387,16 @@ const generateConfig = () => {
       config.channels = form.edge_offline.channels
       config.frame_duration = form.edge_offline.frame_duration
       break
+    case 'openai':
+      config.api_key = form.openai.api_key
+      config.api_url = form.openai.api_url
+      config.model = form.openai.model
+      config.voice = form.openai.voice
+      config.response_format = form.openai.response_format
+      config.speed = form.openai.speed
+      config.stream = form.openai.stream
+      config.frame_duration = form.openai.frame_duration
+      break
     case 'xiaozhi':
       config.server_addr = form.xiaozhi.server_addr
       config.device_id = form.xiaozhi.device_id
@@ -370,6 +433,8 @@ const rules = {
   'edge.volume': [{ required: true, message: '请输入音量', trigger: 'blur' }],
   // Edge 离线验证规则
   'edge_offline.server_url': [{ required: true, message: '请输入服务器URL', trigger: 'blur' }],
+  // OpenAI TTS 验证规则
+  'openai.api_key': [{ required: true, message: '请输入API Key', trigger: 'blur' }],
   // 小智 TTS 验证规则
   'xiaozhi.server_addr': [{ required: true, message: '请输入服务器地址', trigger: 'blur' }],
   'xiaozhi.device_id': [{ required: true, message: '请输入设备ID', trigger: 'blur' }],
@@ -440,6 +505,16 @@ const editConfig = (config) => {
         form.edge_offline.sample_rate = configData.sample_rate || 16000
         form.edge_offline.channels = configData.channels || 1
         form.edge_offline.frame_duration = configData.frame_duration || 20
+        break
+      case 'openai':
+        form.openai.api_key = configData.api_key || ''
+        form.openai.api_url = configData.api_url || 'https://api.openai.com/v1/audio/speech'
+        form.openai.model = configData.model || 'tts-1'
+        form.openai.voice = configData.voice || 'alloy'
+        form.openai.response_format = configData.response_format || 'mp3'
+        form.openai.speed = configData.speed || 1.0
+        form.openai.stream = configData.stream !== undefined ? configData.stream : true
+        form.openai.frame_duration = configData.frame_duration || 60
         break
       case 'xiaozhi':
         form.xiaozhi.server_addr = configData.server_addr || ''
@@ -601,6 +676,16 @@ const resetForm = () => {
       sample_rate: 16000,
       channels: 1,
       frame_duration: 20
+    },
+    openai: {
+      api_key: '',
+      api_url: 'https://api.openai.com/v1/audio/speech',
+      model: 'tts-1',
+      voice: 'alloy',
+      response_format: 'mp3',
+      speed: 1.0,
+      stream: true,
+      frame_duration: 60
     },
     xiaozhi: {
       server_addr: 'wss://api.tenclass.net/xiaozhi/v1/',

@@ -174,6 +174,12 @@ const routes = [
         name: 'AgentDevices',
         component: () => import('../views/user/AgentDevices.vue'),
         meta: { title: '智能体设备管理' }
+      },
+      {
+        path: '/user/agents/:id/history',
+        name: 'AgentHistory',
+        component: () => import('../views/user/AgentHistory.vue'),
+        meta: { title: '聊天历史记录' }
       }
     ]
   }
@@ -211,14 +217,37 @@ router.beforeEach(async (to, from, next) => {
       return
     }
     
-    // 有token但没有用户信息，验证token有效性
+    // 有token但没有用户信息，尝试验证token有效性
     if (!authStore.user && !authStore.isValidating) {
       try {
         await authStore.getProfile()
       } catch (error) {
-        // token无效，跳转到登录页
-        next('/login')
-        return
+        // 如果是401错误（token无效），跳转到登录页
+        if (error.response?.status === 401) {
+          next('/login')
+          return
+        }
+        // 如果是网络错误（后端连接失败），允许继续访问（但会显示错误）
+        if (error.code === 'ERR_NETWORK' || error.message?.includes('Failed to fetch') || error.message?.includes('ERR_CONNECTION_REFUSED')) {
+          // 网络错误时，如果本地有用户信息，允许继续访问
+          if (!authStore.user) {
+            next('/login')
+            return
+          }
+          // 注意：这里不调用 next()，让代码继续执行到最后的 next()
+        } else {
+          // 其他错误，允许继续访问（可能是后端暂时不可用）
+          // 注意：这里不调用 next()，让代码继续执行到最后的 next()
+        }
+      }
+    }
+    
+    // 如果正在验证中，等待验证完成（最多等待2秒）
+    if (authStore.isValidating) {
+      let waitCount = 0
+      while (authStore.isValidating && waitCount < 20) {
+        await new Promise(resolve => setTimeout(resolve, 100))
+        waitCount++
       }
     }
   }

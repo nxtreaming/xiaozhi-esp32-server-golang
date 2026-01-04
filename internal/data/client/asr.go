@@ -21,6 +21,9 @@ type Asr struct {
 	AsrResult        bytes.Buffer                   //保存此次识别到的最终文本
 	Statue           int                            //0:初始化 1:识别中 2:识别结束
 	AutoEnd          bool                           //auto_end是指使用asr自动判断结束，不再使用vad模块
+
+	// 聊天历史音频缓存：持续累积发送到ASR的音频数据
+	HistoryAudioBuffer []float32
 }
 
 func (a *Asr) Reset() {
@@ -68,8 +71,31 @@ func (a *Asr) AddAudioData(pcmFrameData []float32) error {
 	defer a.lock.Unlock()
 	if a.AsrAudioChannel != nil {
 		a.AsrAudioChannel <- pcmFrameData
+
+		// 同步缓存音频数据用于聊天历史记录
+		a.HistoryAudioBuffer = append(a.HistoryAudioBuffer, pcmFrameData...)
 	}
 	return nil
+}
+
+// GetHistoryAudio 获取历史音频缓存（返回副本，不清空原始数据）
+func (a *Asr) GetHistoryAudio() []float32 {
+	a.lock.Lock()
+	defer a.lock.Unlock()
+	if len(a.HistoryAudioBuffer) == 0 {
+		return nil
+	}
+	// 返回副本，避免外部修改影响原始数据
+	result := make([]float32, len(a.HistoryAudioBuffer))
+	copy(result, a.HistoryAudioBuffer)
+	return result
+}
+
+// ClearHistoryAudio 清空历史音频缓存
+func (a *Asr) ClearHistoryAudio() {
+	a.lock.Lock()
+	defer a.lock.Unlock()
+	a.HistoryAudioBuffer = nil
 }
 
 type AsrAudioBuffer struct {

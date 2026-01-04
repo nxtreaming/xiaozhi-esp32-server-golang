@@ -10,6 +10,7 @@ import (
 	"xiaozhi-esp32-server-golang/internal/app/server/mqtt_udp"
 	"xiaozhi-esp32-server-golang/internal/app/server/types"
 	"xiaozhi-esp32-server-golang/internal/app/server/websocket"
+	"xiaozhi-esp32-server-golang/internal/data/history"
 	user_config "xiaozhi-esp32-server-golang/internal/domain/config"
 	config_types "xiaozhi-esp32-server-golang/internal/domain/config/types"
 	log "xiaozhi-esp32-server-golang/logger"
@@ -68,8 +69,30 @@ func (a *App) Run() {
 }
 
 func (app *App) initEventHandle() {
-	eventHandle := NewEventHandle()
-	eventHandle.Start()
+	eventHandle, err := NewEventHandle()
+	if err != nil {
+		log.Errorf("初始化 EventHandle 失败: %v", err)
+		return
+	}
+	if err := eventHandle.Start(); err != nil {
+		log.Errorf("启动 EventHandle 失败: %v", err)
+		return
+	}
+
+	// 初始化聊天历史记录处理器
+	if viper.GetBool("manager.history_enabled") {
+		historyCfg := history.HistoryClientConfig{
+			BaseURL:     viper.GetString("manager.backend_url"),
+			AuthToken:   viper.GetString("manager.history_auth_token"),
+			Timeout:     viper.GetDuration("manager.history_timeout"),
+			Enabled:     viper.GetBool("manager.history_enabled"),
+			EnableAudio: viper.GetBool("manager.history_enable_audio"),
+		}
+		NewHistoryWorker(historyCfg)
+		log.Info("聊天历史记录处理器已初始化")
+	} else {
+		log.Info("聊天历史记录功能已禁用")
+	}
 }
 
 func (app *App) newMqttUdpAdapter() (*mqtt_udp.MqttUdpAdapter, error) {

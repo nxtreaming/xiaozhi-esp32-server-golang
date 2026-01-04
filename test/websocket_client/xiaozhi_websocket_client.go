@@ -103,7 +103,7 @@ func main() {
 	// 解析命令行参数
 	serverAddr := flag.String("server", "ws://localhost:8989/xiaozhi/v1/", "服务器地址")
 	deviceID := flag.String("device", "test-device-001", "设备ID")
-	audioFile := flag.String("audio", "../test.wav", "音频文件路径")
+	audioFile := flag.String("audio", "", "音频文件路径")
 	text := flag.String("text", "你好测试", "文本")
 	modeFlag := flag.String("mode", "auto", "模式")
 	sampleRate := flag.Int("sample_rate", 16000, "sampleRate")
@@ -520,10 +520,14 @@ func sendTextToSpeech(conn *websocket.Conn, deviceID string) error {
 	}
 	_ = edgeConfig
 	//调用tts服务生成语音
-	ttsProvider, err := tts.GetTTSProvider("cosyvoice", cosyVoiceConfig)
+	ttsProvider, err := tts.GetTTSProvider("edge", edgeConfig)
 	if err != nil {
 		return fmt.Errorf("获取tts服务失败: %v", err)
 	}
+	/*ttsProvider, err := tts.GetTTSProvider("cosyvoice", cosyVoiceConfig)
+	if err != nil {
+		return fmt.Errorf("获取tts服务失败: %v", err)
+	}*/
 
 	/*
 		audioData, err := ttsProvider.TextToSpeech(context.Background(), "你叫什么名字?")

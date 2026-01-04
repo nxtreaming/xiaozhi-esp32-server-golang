@@ -2,6 +2,8 @@ package chat
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math/rand"
@@ -16,6 +18,7 @@ import (
 	"xiaozhi-esp32-server-golang/internal/app/server/auth"
 	types_conn "xiaozhi-esp32-server-golang/internal/app/server/types"
 	. "xiaozhi-esp32-server-golang/internal/data/client"
+	"xiaozhi-esp32-server-golang/internal/data/history"
 	. "xiaozhi-esp32-server-golang/internal/data/msg"
 	user_config "xiaozhi-esp32-server-golang/internal/domain/config"
 	"xiaozhi-esp32-server-golang/internal/domain/eventbus"
@@ -91,13 +94,110 @@ func (s *ChatSession) Start(pctx context.Context) error {
 
 // 初始化历史对话记录到内存中
 func (s *ChatSession) initHistoryMessages() error {
-	historyMessages, err := llm_memory.Get().GetMessages(s.ctx, s.clientState.DeviceID, s.clientState.AgentID, 20)
-	if err != nil {
-		log.Errorf("获取对话历史失败: %v", err)
-		return err
+	var historyMessages []*schema.Message
+	var err error
+
+	// 根据配置选择数据源（无优先级关系，直接选择）
+	useRedis := s.shouldUseRedis()
+	useManager := s.shouldUseManager()
+
+	// 根据配置选择数据源（无优先级关系，直接选择）
+	if useRedis {
+		// 从 Redis 加载
+		historyMessages, err = llm_memory.Get().GetMessages(
+			s.ctx,
+			s.clientState.DeviceID,
+			s.clientState.AgentID,
+			20)
+		if err != nil {
+			log.Warnf("从 Redis 加载历史消息失败: %v", err)
+			return err
+		}
+		log.Infof("从 Redis 加载了 %d 条历史消息", len(historyMessages))
+	} else if useManager {
+		// 从 Manager 加载
+		historyMessages, err = s.loadFromManager()
+		if err != nil {
+			log.Warnf("从 Manager 加载历史消息失败: %v", err)
+			return err
+		}
+		log.Infof("从 Manager 加载了 %d 条历史消息", len(historyMessages))
+	} else {
+		// 两个数据源都未配置，不加载历史消息
+		log.Debugf("Redis 和 Manager 都未配置，跳过历史消息加载")
+		return nil
 	}
-	s.clientState.InitMessages(historyMessages)
+
+	if len(historyMessages) > 0 {
+		s.clientState.InitMessages(historyMessages)
+		log.Infof("成功加载 %d 条历史消息", len(historyMessages))
+	} else {
+		log.Debugf("未加载到历史消息（可能没有历史记录）")
+	}
+
 	return nil
+}
+
+// shouldUseRedis 判断是否使用 Redis 作为数据源
+func (s *ChatSession) shouldUseRedis() bool {
+	// 根据 config_provider.type 判断
+	providerType := viper.GetString("config_provider.type")
+	return providerType == "redis"
+}
+
+// shouldUseManager 判断是否使用 Manager 作为数据源
+func (s *ChatSession) shouldUseManager() bool {
+	// 根据 config_provider.type 判断
+	providerType := viper.GetString("config_provider.type")
+	return providerType == "manager"
+}
+
+// loadFromManager 从 Manager 数据库加载历史消息
+func (s *ChatSession) loadFromManager() ([]*schema.Message, error) {
+	// 创建 HistoryClient
+	historyCfg := history.HistoryClientConfig{
+		BaseURL:     viper.GetString("manager.backend_url"),
+		AuthToken:   viper.GetString("manager.history_auth_token"),
+		Timeout:     viper.GetDuration("manager.history_timeout"),
+		Enabled:     true,
+		EnableAudio: false, // 初始化时不需要音频
+	}
+	client := history.NewHistoryClient(historyCfg)
+
+	req := &history.GetMessagesRequest{
+		DeviceID:  s.clientState.DeviceID,
+		AgentID:   s.clientState.AgentID,
+		SessionID: s.clientState.SessionID,
+		Limit:     20,
+	}
+
+	resp, err := client.GetMessages(s.ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	// 转换为 schema.Message 格式
+	messages := make([]*schema.Message, 0, len(resp.Messages))
+	for _, item := range resp.Messages {
+		var msg *schema.Message
+		switch item.Role {
+		case "user":
+			msg = schema.UserMessage(item.Content)
+		case "assistant":
+			msg = schema.AssistantMessage(item.Content, nil)
+		case "tool":
+			msg = schema.ToolMessage(item.Content, item.ToolCallID)
+		case "system":
+			msg = schema.SystemMessage(item.Content)
+		default:
+			log.Warnf("未知的消息角色: %s", item.Role)
+			continue
+		}
+
+		messages = append(messages, msg)
+	}
+
+	return messages, nil
 }
 
 // 在mqtt 收到type: listen, state: start后进行
@@ -611,6 +711,42 @@ func (s *ChatSession) OnListenStart() error {
 			log.Debugf("处理asr结果: %s, 耗时: %d ms", text, s.clientState.GetAsrDuration())
 
 			if text != "" {
+				// 创建用户消息
+				userMsg := &schema.Message{
+					Role:    schema.User,
+					Content: text,
+				}
+
+				// 生成 MessageID（使用 MD5 哈希缩短长度，避免超过数据库 varchar(64) 限制）
+				// 原始格式：{SessionID}-{Role}-{Timestamp}
+				rawMessageID := fmt.Sprintf("%s-%s-%d",
+					s.clientState.SessionID,
+					userMsg.Role,
+					time.Now().UnixMilli())
+				// 使用 MD5 哈希生成固定32字符的十六进制字符串
+				hash := md5.Sum([]byte(rawMessageID))
+				messageID := hex.EncodeToString(hash[:])
+
+				// 同步添加到内存中（用于 LLM 上下文）
+				s.clientState.AddMessage(userMsg)
+
+				// 获取音频数据（ASR 历史音频）
+				audioData := s.clientState.Asr.GetHistoryAudio()
+				s.clientState.Asr.ClearHistoryAudio()
+
+				// ASR 文本和音频同时获取，一次性保存（不需要两阶段）
+				eventbus.Get().Publish(eventbus.TopicAddMessage, &eventbus.AddMessageEvent{
+					ClientState: s.clientState,
+					Msg:         *userMsg,
+					MessageID:   messageID,
+					AudioData:   [][]byte{util.Float32SliceToBytes(audioData)}, // 转换为字节数组
+					AudioSize:   len(audioData) * 4,                            // float32 = 4 bytes
+					SampleRate:  s.clientState.InputAudioFormat.SampleRate,
+					Channels:    s.clientState.InputAudioFormat.Channels,
+					IsUpdate:    false, // 一次性保存（文本+音频）
+					Timestamp:   time.Now(),
+				})
+
 				//如果是realtime模式下，需要停止 当前的llm和tts
 				if s.clientState.IsRealTime() && viper.GetInt("chat.realtime_mode") == 2 {
 					s.clientState.AfterAsrSessionCtx.Cancel()

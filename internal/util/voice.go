@@ -78,3 +78,15 @@ func ResampleLinearFloat32(input []float32, inRate, outRate int) []float32 {
 	}
 	return output
 }
+
+// Float32SliceToBytes 将 float32 数组转换为字节数组（小端序，每个float32占4字节）
+func Float32SliceToBytes(data []float32) []byte {
+	if len(data) == 0 {
+		return nil
+	}
+	bytes := make([]byte, len(data)*4)
+	for i, v := range data {
+		binary.LittleEndian.PutUint32(bytes[i*4:i*4+4], math.Float32bits(v))
+	}
+	return bytes
+}

@@ -196,6 +196,7 @@ func (a *ASRManager) RestartAsrRecognition(ctx context.Context) error {
 
 	state.VoiceStatus.Reset()
 	state.AsrAudioBuffer.ClearAsrAudioData()
+	state.Asr.ClearHistoryAudio() // 清空历史音频缓存
 
 	// 等待一小段时间让资源清理
 	select {

@@ -8,6 +8,7 @@ require (
 	github.com/asaskevich/EventBus v0.0.0-20200907212545-49d423059eef
 	github.com/bytedance/gopkg v0.1.3
 	github.com/bytedance/sonic v1.13.2
+	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/cloudwego/eino v0.3.40
 	github.com/cloudwego/eino-ext/components/model/ollama v0.0.0-20250530094010-bd1c4fc20bbe
 	github.com/cloudwego/eino-ext/components/model/openai v0.0.0-20250530094010-bd1c4fc20bbe
@@ -28,6 +29,7 @@ require (
 	github.com/memodb-io/memobase/src/client/memobase-go v0.0.0-20251008012534-936f45328453
 	github.com/mochi-mqtt/server/v2 v2.7.9
 	github.com/orcaman/concurrent-map/v2 v2.0.1
+	github.com/panjf2000/ants/v2 v2.11.4
 	github.com/redis/go-redis/v9 v9.7.3
 	github.com/scroot/music-sd v0.0.1
 	github.com/sirupsen/logrus v1.9.3
@@ -92,7 +94,7 @@ require (
 	golang.org/x/arch v0.11.0 // indirect
 	golang.org/x/exp v0.0.0-20231110203233-9a3e6036ecaa // indirect
 	golang.org/x/net v0.33.0 // indirect
-	golang.org/x/sync v0.10.0 // indirect
+	golang.org/x/sync v0.11.0 // indirect
 	golang.org/x/sys v0.29.0 // indirect
 	golang.org/x/term v0.28.0 // indirect
 	golang.org/x/text v0.21.0 // indirect

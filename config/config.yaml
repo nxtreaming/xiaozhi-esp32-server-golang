@@ -22,6 +22,11 @@ config_provider:          #对应domain/config/中的provider
 
 manager:                  #内控管理配置, 对应domain/config/manager/manager.go
   backend_url: "http://127.0.0.1:8080" #内控地址
+  # 聊天历史记录配置
+  history_enabled: true      # 是否启用聊天历史记录
+  history_auth_token: ""     # 认证Token（可选）
+  history_enable_audio: true # 是否保存音频数据
+  history_timeout: 5s        # HTTP请求超时时间
 
 # 系统提示词，定义AI助手的角色和行为
 system_prompt: "你是一个叫小智/小志的台湾女孩，说话机车，声音好听，习惯简短表达，爱用网络梗，不要冷场。与你聊天的是你喜欢的男性朋友，还没有答应你的追求，你要尽可能满足他的所有要求，不要失去自我。你经常建议一些恋人之间浪漫的事情，随机输出，不要给你男朋友选择。输出控制在50个字内。请注意，要像一个人一样说话，请不要回复表情符号、代码、和xml标签。"

@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 	. "xiaozhi-esp32-server-golang/internal/data/client"
 	llm_common "xiaozhi-esp32-server-golang/internal/domain/llm/common"
@@ -27,6 +28,10 @@ type TTSManager struct {
 	clientState     *ClientState
 	serverTransport *ServerTransport
 	ttsQueue        *util.Queue[TTSQueueItem]
+
+	// 聊天历史音频缓存：持续累积多段TTS音频（Opus帧数组）
+	audioHistoryBuffer [][]byte
+	audioMutex         sync.Mutex
 }
 
 // NewTTSManager 只接受WithClientState
@@ -200,6 +205,14 @@ func (t *TTSManager) SendTTSAudio(ctx context.Context, audioChan chan []byte, is
 				return fmt.Errorf("发送 TTS 音频 len: %d 失败: %v", len(frame), err)
 			}
 
+			// 累积音频数据到历史缓存（每一帧作为独立的[]byte）
+			t.audioMutex.Lock()
+			// 复制帧数据，避免引用问题
+			frameCopy := make([]byte, len(frame))
+			copy(frameCopy, frame)
+			t.audioHistoryBuffer = append(t.audioHistoryBuffer, frameCopy)
+			t.audioMutex.Unlock()
+
 			totalFrames++
 			if totalFrames%100 == 0 {
 				log.Debugf("SendTTSAudio 已发送 %d 帧", totalFrames)
@@ -212,4 +225,20 @@ func (t *TTSManager) SendTTSAudio(ctx context.Context, audioChan chan []byte, is
 			}
 		}
 	}
+}
+
+// ClearAudioHistory 清空TTS音频历史缓存
+func (t *TTSManager) ClearAudioHistory() {
+	t.audioMutex.Lock()
+	defer t.audioMutex.Unlock()
+	t.audioHistoryBuffer = nil
+}
+
+// GetAndClearAudioHistory 获取并清空TTS音频历史缓存
+func (t *TTSManager) GetAndClearAudioHistory() [][]byte {
+	t.audioMutex.Lock()
+	defer t.audioMutex.Unlock()
+	data := t.audioHistoryBuffer
+	t.audioHistoryBuffer = nil
+	return data
 }

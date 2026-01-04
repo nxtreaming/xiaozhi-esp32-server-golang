@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"time"
 
 	log "xiaozhi-esp32-server-golang/logger"
@@ -536,4 +537,200 @@ func GetAudioFormatByMimeType(mimeType string) string {
 		// 默认返回mp3格式
 		return "mp3"
 	}
+}
+
+// writeSeekerBuffer 实现io.WriteSeeker接口，包装bytes.Buffer
+type writeSeekerBuffer struct {
+	*bytes.Buffer
+	pos int64
+}
+
+func newWriteSeekerBuffer() *writeSeekerBuffer {
+	return &writeSeekerBuffer{
+		Buffer: bytes.NewBuffer(nil),
+		pos:    0,
+	}
+}
+
+func (w *writeSeekerBuffer) Write(p []byte) (n int, err error) {
+	// 如果当前位置在缓冲区末尾，直接追加
+	if w.pos == int64(w.Buffer.Len()) {
+		n, err = w.Buffer.Write(p)
+		w.pos += int64(n)
+		return n, err
+	}
+
+	// 如果当前位置在缓冲区中间，需要在该位置写入
+	// 获取当前缓冲区数据的副本（避免直接修改底层缓冲区）
+	data := make([]byte, w.Buffer.Len())
+	copy(data, w.Buffer.Bytes())
+	
+	// 如果写入会超出当前缓冲区，需要扩展
+	endPos := w.pos + int64(len(p))
+	if endPos > int64(len(data)) {
+		// 扩展缓冲区
+		extra := int(endPos - int64(len(data)))
+		data = append(data, make([]byte, extra)...)
+	}
+	
+	// 在指定位置写入数据
+	copy(data[w.pos:], p)
+	
+	// 更新缓冲区
+	w.Buffer.Reset()
+	w.Buffer.Write(data)
+	
+	n = len(p)
+	w.pos += int64(n)
+	return n, nil
+}
+
+func (w *writeSeekerBuffer) Seek(offset int64, whence int) (int64, error) {
+	var newPos int64
+	switch whence {
+	case io.SeekStart:
+		newPos = offset
+	case io.SeekCurrent:
+		newPos = w.pos + offset
+	case io.SeekEnd:
+		newPos = int64(w.Buffer.Len()) + offset
+	default:
+		return 0, fmt.Errorf("invalid whence: %d", whence)
+	}
+
+	if newPos < 0 {
+		return 0, fmt.Errorf("negative position")
+	}
+
+	// 如果新位置超出当前缓冲区长度，需要扩展
+	if newPos > int64(w.Buffer.Len()) {
+		// 扩展缓冲区
+		extra := int(newPos - int64(w.Buffer.Len()))
+		w.Buffer.Write(make([]byte, extra))
+	}
+
+	w.pos = newPos
+	return w.pos, nil
+}
+
+// PCMFloat32BytesToWav 将PCM float32字节数组转换为WAV格式
+// audioData: PCM float32格式的字节数组（每个float32占4字节，小端序）
+// sampleRate: 采样率
+// channels: 通道数
+// 返回: WAV格式的字节数组
+func PCMFloat32BytesToWav(audioData []byte, sampleRate, channels int) ([]byte, error) {
+	if len(audioData) == 0 {
+		return nil, fmt.Errorf("音频数据为空")
+	}
+
+	// 将字节数组转换为float32切片（小端序，每个float32占4字节）
+	if len(audioData)%4 != 0 {
+		// 如果不是4的倍数，截断到最近的4的倍数
+		audioData = audioData[:len(audioData)-len(audioData)%4]
+	}
+	float32Data := make([]float32, len(audioData)/4)
+	for i := 0; i < len(float32Data); i++ {
+		bits := uint32(audioData[i*4]) | uint32(audioData[i*4+1])<<8 | uint32(audioData[i*4+2])<<16 | uint32(audioData[i*4+3])<<24
+		float32Data[i] = math.Float32frombits(bits)
+	}
+
+	// 将float32转换为int16
+	int16Data := Float32SliceToInt16Slice(float32Data)
+
+	// 创建WAV编码器（使用writeSeekerBuffer作为输出）
+	wavBuffer := newWriteSeekerBuffer()
+	wavEncoder := wav.NewEncoder(wavBuffer, sampleRate, 16, channels, 1)
+
+	// 创建音频缓冲区
+	audioBuf := &audio.IntBuffer{
+		Format: &audio.Format{
+			NumChannels: channels,
+			SampleRate:  sampleRate,
+		},
+		SourceBitDepth: 16,
+		Data:           make([]int, len(int16Data)),
+	}
+
+	// 将int16数据转换为int切片
+	for i, sample := range int16Data {
+		audioBuf.Data[i] = int(sample)
+	}
+
+	// 写入WAV文件
+	if err := wavEncoder.Write(audioBuf); err != nil {
+		return nil, fmt.Errorf("写入WAV数据失败: %v", err)
+	}
+
+	if err := wavEncoder.Close(); err != nil {
+		return nil, fmt.Errorf("关闭WAV编码器失败: %v", err)
+	}
+
+	return wavBuffer.Buffer.Bytes(), nil
+}
+
+// OpusFramesToWav 将Opus帧数组转换为WAV格式
+// opusFrames: Opus格式的音频帧数组（每个元素是一个Opus帧）
+// sampleRate: 采样率
+// channels: 通道数
+// 返回: WAV格式的字节数组
+// 参考: test/test_audio/audio_utils.go 中的 OpusToWav 实现
+func OpusFramesToWav(opusFrames [][]byte, sampleRate, channels int) ([]byte, error) {
+	if len(opusFrames) == 0 {
+		return nil, fmt.Errorf("音频数据为空")
+	}
+
+	// 创建Opus解码器
+	opusDecoder, err := opus.NewDecoder(sampleRate, channels)
+	if err != nil {
+		return nil, fmt.Errorf("创建Opus解码器失败: %v", err)
+	}
+
+	// 创建WAV编码器（使用writeSeekerBuffer作为输出）
+	wavBuffer := newWriteSeekerBuffer()
+	wavEncoder := wav.NewEncoder(wavBuffer, sampleRate, 16, channels, 1)
+
+	// 创建音频缓冲区
+	audioBuf := &audio.IntBuffer{
+		Format: &audio.Format{
+			NumChannels: channels,
+			SampleRate:  sampleRate,
+		},
+		SourceBitDepth: 16,
+		Data:           make([]int, 0),
+	}
+
+	// PCM缓冲区用于解码（使用60ms作为估算，足够大以容纳一帧）
+	perFrameDuration := 60
+	pcmBuffer := make([]int16, channels*sampleRate*perFrameDuration/1000)
+
+	// 遍历所有Opus帧并解码
+	for _, opusFrame := range opusFrames {
+		if len(opusFrame) == 0 {
+			continue
+		}
+
+		// 解码Opus帧
+		n, err := opusDecoder.Decode(opusFrame, pcmBuffer)
+		if err != nil {
+			return nil, fmt.Errorf("解码Opus帧失败: %v", err)
+		}
+
+		// 将PCM数据转换为int格式并添加到缓冲区
+		for i := 0; i < n; i++ {
+			audioBuf.Data = append(audioBuf.Data, int(pcmBuffer[i]))
+		}
+	}
+
+	// 写入WAV文件
+	if len(audioBuf.Data) > 0 {
+		if err := wavEncoder.Write(audioBuf); err != nil {
+			return nil, fmt.Errorf("写入WAV数据失败: %v", err)
+		}
+	}
+
+	if err := wavEncoder.Close(); err != nil {
+		return nil, fmt.Errorf("关闭WAV编码器失败: %v", err)
+	}
+
+	return wavBuffer.Buffer.Bytes(), nil
 }
