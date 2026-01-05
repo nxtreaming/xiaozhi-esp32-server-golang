@@ -104,31 +104,30 @@ func NewChatSession(clientState *ClientState, serverTransport *ServerTransport, 
 				clientState.OnVoiceSilenceSpeakerCallback = func(ctx context.Context) {
 					log.Debugf("[声纹识别] OnVoiceSilenceSpeakerCallback 被调用, deviceID: %s", clientState.DeviceID)
 
-					// 清空之前的结果
-					s.speakerResultMu.Lock()
-					oldResult := s.pendingSpeakerResult
-					s.pendingSpeakerResult = nil
-					s.speakerResultMu.Unlock()
-					if oldResult != nil {
-						log.Debugf("[声纹识别] 清空之前的识别结果: identified=%v, speaker_id=%s", oldResult.Identified, oldResult.SpeakerID)
-					}
-
-					// 清空就绪通知（非阻塞）
-					select {
-					case <-s.speakerResultReady:
-						log.Debugf("[声纹识别] 清空就绪通知通道")
-					default:
-						log.Debugf("[声纹识别] 就绪通知通道已为空")
-					}
-
 					// 异步获取声纹结果
 					go func() {
 						log.Debugf("[声纹识别] 开始异步获取声纹识别结果, deviceID: %s", clientState.DeviceID)
 
 						// 检查 speakerManager 是否激活
 						if !s.speakerManager.IsActive() {
-							log.Warnf("[声纹识别] speakerManager 未激活，无法获取识别结果")
+							//log.Warnf("[声纹识别] speakerManager 未激活，无法获取识别结果")
 							return
+						}
+						// 清空之前的结果
+						s.speakerResultMu.Lock()
+						oldResult := s.pendingSpeakerResult
+						s.pendingSpeakerResult = nil
+						s.speakerResultMu.Unlock()
+						if oldResult != nil {
+							log.Debugf("[声纹识别] 清空之前的识别结果: identified=%v, speaker_id=%s", oldResult.Identified, oldResult.SpeakerID)
+						}
+
+						// 清空就绪通知（非阻塞）
+						select {
+						case <-s.speakerResultReady:
+							log.Debugf("[声纹识别] 清空就绪通知通道")
+						default:
+							log.Debugf("[声纹识别] 就绪通知通道已为空")
 						}
 
 						result, err := s.speakerManager.FinishAndIdentify(ctx)
@@ -878,7 +877,7 @@ func (s *ChatSession) OnListenStart() error {
 				var speakerResult *speaker.IdentifyResult
 				log.Debugf("s.speakerManager: %+v, IsActive: %+v", s.speakerManager, s.speakerManager.IsActive())
 				if s.speakerManager != nil {
-					timeout := time.NewTimer(200 * time.Millisecond)
+					timeout := time.NewTimer(500 * time.Millisecond)
 					defer timeout.Stop()
 					select {
 					case <-s.speakerResultReady:

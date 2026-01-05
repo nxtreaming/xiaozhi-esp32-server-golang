@@ -300,6 +300,85 @@
       :before-close="handleCloseUploadDialog"
     >
       <el-tabs v-model="uploadMode" class="upload-tabs">
+        <!-- 从历史记录选择 -->
+        <el-tab-pane label="从历史记录选择" name="history">
+          <div class="history-section">
+            <el-form :model="historyForm" label-width="100px">
+              <el-form-item label="智能体">
+                <el-select
+                  v-model="historyForm.agent_id"
+                  placeholder="请选择智能体"
+                  style="width: 100%"
+                  @change="loadHistoryMessages"
+                  clearable
+                >
+                  <el-option
+                    v-for="agent in agents"
+                    :key="agent.id"
+                    :label="agent.name"
+                    :value="agent.id"
+                  />
+                </el-select>
+              </el-form-item>
+            </el-form>
+            
+            <div v-loading="loadingHistory" class="history-list">
+              <div v-if="historyMessages.length === 0 && !loadingHistory" class="empty-history">
+                <el-empty description="暂无历史聊天记录，请先选择智能体" />
+              </div>
+              <el-table
+                v-else
+                :data="historyMessages"
+                row-key="message_id"
+                stripe
+                style="width: 100%"
+                max-height="400"
+                @row-click="handleSelectHistoryMessage"
+              >
+                <el-table-column label="选择" width="80" align="center">
+                  <template #default="{ row }">
+                    <el-radio
+                      :model-value="historyForm.selected_message_id"
+                      :label="row.message_id"
+                      @change="historyForm.selected_message_id = row.message_id"
+                    />
+                  </template>
+                </el-table-column>
+                <el-table-column prop="content" label="消息内容" min-width="200">
+                  <template #default="{ row }">
+                    <div class="message-content">{{ truncateText(row.content, 50) }}</div>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="device_id" label="设备ID" width="150">
+                  <template #default="{ row }">
+                    <el-tooltip :content="row.device_id" placement="top">
+                      <span>{{ truncateId(row.device_id) }}</span>
+                    </el-tooltip>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="created_at" label="时间" width="180">
+                  <template #default="{ row }">
+                    {{ formatDate(row.created_at) }}
+                  </template>
+                </el-table-column>
+                <el-table-column label="操作" width="100">
+                  <template #default="{ row }">
+                    <el-button
+                      type="primary"
+                      size="small"
+                      link
+                      @click.stop="handlePreviewHistoryAudio(row)"
+                    >
+                      <el-icon><VideoPlay /></el-icon>
+                      试听
+                    </el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </div>
+          </div>
+        </el-tab-pane>
+        
         <!-- 上传文件 -->
         <el-tab-pane label="上传文件" name="upload">
           <el-form
@@ -593,7 +672,7 @@ const groupDialogMode = ref('add') // 'add' | 'edit'
 const currentGroup = ref(null)
 const showSampleDrawer = ref(false)
 const showUploadDialog = ref(false)
-const uploadMode = ref('upload') // 'upload' | 'record'
+const uploadMode = ref('upload') // 'upload' | 'record' | 'history'
 
 // 验证对话框相关
 const showVerifyDialog = ref(false)
@@ -690,8 +769,19 @@ const uploadRules = {
   ]
 }
 
+// 历史记录相关
+const loadingHistory = ref(false)
+const historyMessages = ref([])
+const historyForm = reactive({
+  agent_id: null,
+  selected_message_id: null
+})
+
 // 计算是否有音频文件
 const hasAudioFile = computed(() => {
+  if (uploadMode.value === 'history') {
+    return historyForm.selected_message_id !== null
+  }
   return uploadForm.audioFile !== null || recordedBlob.value !== null
 })
 
@@ -1186,6 +1276,17 @@ const handleAddSample = async () => {
   uploadMode.value = 'upload'
   showUploadDialog.value = true
   
+  // 初始化历史记录表单
+  historyForm.agent_id = currentGroup.value?.agent_id || null
+  historyForm.selected_message_id = null
+  historyMessages.value = []
+  
+  // 如果声纹组有关联的智能体，自动加载历史记录
+  if (currentGroup.value?.agent_id) {
+    historyForm.agent_id = currentGroup.value.agent_id
+    await loadHistoryMessages()
+  }
+  
   // 检查浏览器是否支持录音
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
@@ -1447,8 +1548,94 @@ const formatRecordTime = (seconds) => {
   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${ms}`
 }
 
+// 加载历史聊天记录
+const loadHistoryMessages = async () => {
+  if (!historyForm.agent_id) {
+    historyMessages.value = []
+    return
+  }
+
+  try {
+    loadingHistory.value = true
+    const response = await api.get('/user/history/messages', {
+      params: {
+        agent_id: historyForm.agent_id,
+        role: 'user',
+        page: 1,
+        page_size: 50
+      }
+    })
+    
+    // 只显示有音频的消息
+    historyMessages.value = (response.data.data || []).filter(msg => msg.audio_path)
+  } catch (error) {
+    console.error('加载历史聊天记录失败:', error)
+    ElMessage.error('加载历史聊天记录失败: ' + (error.response?.data?.error || error.message))
+    historyMessages.value = []
+  } finally {
+    loadingHistory.value = false
+  }
+}
+
+// 选择历史消息
+const handleSelectHistoryMessage = (row) => {
+  historyForm.selected_message_id = row.message_id
+}
+
+// 试听历史音频
+const handlePreviewHistoryAudio = async (message) => {
+  try {
+    const response = await api.get(`/user/history/messages/${message.id}/audio`, {
+      responseType: 'blob'
+    })
+    
+    const blob = new Blob([response.data], { type: 'audio/wav' })
+    const blobUrl = URL.createObjectURL(blob)
+    
+    audioPlayer.value.src = blobUrl
+    audioPlayer.value.play().catch(err => {
+      console.error('播放失败:', err)
+      ElMessage.warning('播放失败，请检查音频文件')
+    })
+    
+    audioPlayer.value.onended = () => {
+      URL.revokeObjectURL(blobUrl)
+    }
+  } catch (error) {
+    console.error('试听失败:', error)
+    ElMessage.error('试听失败: ' + (error.response?.data?.error || error.message))
+  }
+}
+
 // 提交样本
 const handleSubmitSample = async () => {
+  if (uploadMode.value === 'history') {
+    // 从历史记录中选择
+    if (!historyForm.selected_message_id) {
+      ElMessage.warning('请选择一条历史聊天记录')
+      return
+    }
+
+    try {
+      submitting.value = true
+      const formData = new FormData()
+      formData.append('message_id', historyForm.selected_message_id)
+
+      await api.post(`/user/speaker-groups/${currentGroup.value.id}/samples`, formData)
+      ElMessage.success('添加成功')
+      handleCloseUploadDialog()
+      await loadSamples(currentGroup.value.id)
+      await loadSpeakerGroups() // 刷新列表以更新样本数量
+    } catch (error) {
+      console.error('添加失败:', error)
+      ElMessage.error('添加失败: ' + (error.response?.data?.error || error.message))
+    } finally {
+      submitting.value = false
+    }
+    return
+  }
+
+  // 原有的上传/录制逻辑
   if (!uploadFormRef.value) return
 
   try {
@@ -1627,6 +1814,11 @@ const resetUploadForm = () => {
   recordedBlob.value = null
   recordTime.value = 0
   uploadMode.value = 'upload'
+  
+  // 清理历史记录相关
+  historyForm.agent_id = null
+  historyForm.selected_message_id = null
+  historyMessages.value = []
 }
 
 // 格式化日期
@@ -1966,5 +2158,33 @@ onBeforeUnmount(() => {
 
 .record-controls .el-button {
   min-width: 120px;
+}
+
+/* 历史记录区域样式 */
+.history-section {
+  padding: 20px 0;
+}
+
+.history-list {
+  margin-top: 20px;
+}
+
+.empty-history {
+  padding: 40px 0;
+}
+
+.message-content {
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-list :deep(.el-table__row) {
+  cursor: pointer;
+}
+
+.history-list :deep(.el-table__row:hover) {
+  background-color: #f5f7fa;
 }
 </style>

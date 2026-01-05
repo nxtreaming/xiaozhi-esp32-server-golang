@@ -758,7 +758,7 @@ func (l *LLMManager) DoLLmRequest(ctx context.Context, userMessage *schema.Messa
 	l.einoTools = einoTools
 
 	//组装历史消息和当前用户的消息
-	requestMessages := l.GetMessages(ctx, userMessage, MaxMessageCount)
+	requestMessages := l.GetMessages(ctx, userMessage, MaxMessageCount, speakerResult)
 	clientState.SetStatus(ClientStatusLLMStart)
 	responseSentences, err := llm.HandleLLMWithContextAndTools(
 		ctx,
@@ -857,7 +857,7 @@ func (l *LLMManager) AddLlmMessage(ctx context.Context, msg *schema.Message) err
 	return l.AddMessage(ctx, msg)
 }
 
-func (l *LLMManager) GetMessages(ctx context.Context, userMessage *schema.Message, count int) []*schema.Message {
+func (l *LLMManager) GetMessages(ctx context.Context, userMessage *schema.Message, count int, speakerResult *speaker.IdentifyResult) []*schema.Message {
 	//从dialogue中获取
 	messageList := l.clientState.GetMessages(count)
 
@@ -865,6 +865,22 @@ func (l *LLMManager) GetMessages(ctx context.Context, userMessage *schema.Messag
 	systemPrompt := l.clientState.SystemPrompt
 	if l.clientState.MemoryContext != "" {
 		systemPrompt += fmt.Sprintf("\n用户个性化信息: \n%s", l.clientState.MemoryContext)
+	}
+
+	log.Debugf("speakerResult: %+v, voiceIdentify: %+v", speakerResult, l.clientState.DeviceConfig.VoiceIdentify)
+
+	// 整合说话人识别结果到 systemPrompt
+	if speakerResult != nil && speakerResult.Identified {
+		// 根据 speakerResult 匹配 userConfig 中的 speakerGroup 信息
+		if l.clientState.DeviceConfig.VoiceIdentify != nil {
+			// 优先使用 SpeakerName 匹配（VoiceIdentify 的 key 是 speakerGroup.Name）
+			if speakerGroupInfo, found := l.clientState.DeviceConfig.VoiceIdentify[speakerResult.SpeakerName]; found {
+				// 如果找到匹配的 speakerGroup，将描述整合到 systemPrompt
+				if speakerGroupInfo.Prompt != "" {
+					systemPrompt += fmt.Sprintf("\n基于声纹识别到对话人信息: \n%s", speakerGroupInfo.Prompt)
+				}
+			}
+		}
 	}
 
 	//search memory

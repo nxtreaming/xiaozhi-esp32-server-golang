@@ -10,6 +10,8 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -25,10 +27,11 @@ import (
 
 // SpeakerGroupController 声纹组控制器
 type SpeakerGroupController struct {
-	DB           *gorm.DB
-	ServiceURL   string
-	HTTPClient   *http.Client
-	AudioStorage *storage.AudioStorage
+	DB            *gorm.DB
+	ServiceURL    string
+	HTTPClient    *http.Client
+	AudioStorage  *storage.AudioStorage
+	HistoryConfig *config.HistoryConfig // 历史聊天记录配置
 }
 
 // NewSpeakerGroupController 创建声纹组控制器
@@ -43,10 +46,11 @@ func NewSpeakerGroupController(db *gorm.DB, cfg *config.Config) *SpeakerGroupCon
 	)
 
 	return &SpeakerGroupController{
-		DB:           db,
-		ServiceURL:   cfg.SpeakerService.URL,
-		HTTPClient:   httpClient,
-		AudioStorage: audioStorage,
+		DB:            db,
+		ServiceURL:    cfg.SpeakerService.URL,
+		HTTPClient:    httpClient,
+		AudioStorage:  audioStorage,
+		HistoryConfig: &cfg.History,
 	}
 }
 
@@ -431,23 +435,90 @@ func (sgc *SpeakerGroupController) AddSample(c *gin.Context) {
 		return
 	}
 
-	// 获取上传的音频文件
-	file, header, err := c.Request.FormFile("audio")
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "音频文件缺失: " + err.Error()})
-		return
+	var file multipart.File
+	var header *multipart.FileHeader
+	var fileName string
+
+	// 检查是否从历史聊天记录中获取音频
+	messageID := c.PostForm("message_id")
+	if messageID != "" {
+		// 从历史聊天记录中获取音频
+		var chatMessage models.ChatMessage
+		if err := sgc.DB.Where("message_id = ? AND user_id = ? AND role = ? AND is_deleted = ?",
+			messageID, userID, "user", false).First(&chatMessage).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				c.JSON(http.StatusNotFound, gin.H{"error": "历史聊天记录不存在或不是用户消息"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "查询历史聊天记录失败"})
+			return
+		}
+
+		if chatMessage.AudioPath == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "该消息没有音频数据"})
+			return
+		}
+
+		// 读取音频文件
+		audioBasePath := sgc.HistoryConfig.AudioBasePath
+		if audioBasePath == "" {
+			audioBasePath = "./storage/chat_history/audio"
+		}
+		fullPath := filepath.Join(audioBasePath, chatMessage.AudioPath)
+
+		audioData, err := os.ReadFile(fullPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "音频文件不存在"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "读取音频文件失败: " + err.Error()})
+			return
+		}
+
+		// 创建临时文件用于 multipart
+		tempFile, err := os.CreateTemp("", "audio_*.wav")
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "创建临时文件失败: " + err.Error()})
+			return
+		}
+		defer os.Remove(tempFile.Name()) // 清理临时文件
+		defer tempFile.Close()
+
+		if _, err := tempFile.Write(audioData); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "写入临时文件失败: " + err.Error()})
+			return
+		}
+		tempFile.Seek(0, 0)
+
+		// 创建 multipart.File 和 FileHeader
+		file = tempFile
+		fileInfo, _ := tempFile.Stat()
+		header = &multipart.FileHeader{
+			Filename: fmt.Sprintf("history_%s.wav", messageID),
+			Size:     fileInfo.Size(),
+		}
+		fileName = header.Filename
+	} else {
+		// 从上传的文件中获取音频
+		file, header, err = c.Request.FormFile("audio")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "音频文件缺失: " + err.Error()})
+			return
+		}
+		defer file.Close()
+		fileName = header.Filename
 	}
-	defer file.Close()
 
 	// 生成 UUID
 	sampleUUID := uuid.New().String()
 
 	// 保存音频文件到本地
-	filePath, fileSize, err := sgc.AudioStorage.SaveAudioFile(
+	filePath, savedFileSize, err := sgc.AudioStorage.SaveAudioFile(
 		userID.(uint),
 		uint(groupID),
 		sampleUUID,
-		header.Filename,
+		fileName,
 		file,
 	)
 	if err != nil {
@@ -479,8 +550,8 @@ func (sgc *SpeakerGroupController) AddSample(c *gin.Context) {
 		UserID:         userID.(uint),
 		UUID:           sampleUUID,
 		FilePath:       filePath,
-		FileName:       header.Filename,
-		FileSize:       fileSize,
+		FileName:       fileName,
+		FileSize:       savedFileSize,
 		Status:         "active",
 	}
 

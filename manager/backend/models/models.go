@@ -76,9 +76,9 @@ type GlobalRole struct {
 // 声纹组模型
 type SpeakerGroup struct {
 	ID          uint      `json:"id" gorm:"primarykey"`
-	UserID      uint      `json:"user_id" gorm:"not null;index"`
+	UserID      uint      `json:"user_id" gorm:"not null;index;uniqueIndex:idx_speaker_groups_user_name,priority:1"`
 	AgentID     uint      `json:"agent_id" gorm:"not null;index"`
-	Name        string    `json:"name" gorm:"type:varchar(100);not null"`
+	Name        string    `json:"name" gorm:"type:varchar(100);not null;uniqueIndex:idx_speaker_groups_user_name,priority:2"`
 	Prompt      string    `json:"prompt" gorm:"type:text"`
 	Description string    `json:"description" gorm:"type:text"`
 	Status      string    `json:"status" gorm:"type:varchar(20);default:'active'"`
