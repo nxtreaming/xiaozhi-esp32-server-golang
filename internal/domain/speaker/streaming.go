@@ -16,19 +16,17 @@ import (
 
 // StreamingClient WebSocket 流式识别客户端
 type StreamingClient struct {
-	wsURL       string
-	conn        *websocket.Conn
-	sampleRate  int
-	mutex       sync.Mutex
-	isConnected bool
+	wsURL      string
+	conn       *websocket.Conn
+	sampleRate int
+	mutex      sync.Mutex
 }
 
 // NewStreamingClient 创建流式识别客户端
 func NewStreamingClient(baseURL string) *StreamingClient {
 	wsURL := deriveWebSocketURL(baseURL)
 	return &StreamingClient{
-		wsURL:       wsURL,
-		isConnected: false,
+		wsURL: wsURL,
 	}
 }
 
@@ -53,11 +51,18 @@ func (sc *StreamingClient) Connect(sampleRate int, agentId string, threshold flo
 	sc.mutex.Lock()
 	defer sc.mutex.Unlock()
 
-	if sc.isConnected {
-		return fmt.Errorf("already connected")
-	}
-
 	sc.sampleRate = sampleRate
+
+	// 如果已存在连接，使用 Ping 检测连接是否仍然有效
+	if sc.conn != nil {
+		if sc.pingConnectionLocked() {
+			// 连接有效，复用现有连接
+			return nil
+		}
+		// 连接已断开，关闭旧连接准备重连
+		log.Debugf("检测到旧连接已断开，将重新建立连接")
+		sc.closeConnectionLocked()
+	}
 
 	// 构建 WebSocket URL，包含采样率、agent_id 和 threshold 参数
 	wsURL := fmt.Sprintf("%s?sample_rate=%d", sc.wsURL, sampleRate)
@@ -80,7 +85,6 @@ func (sc *StreamingClient) Connect(sampleRate int, agentId string, threshold flo
 	}
 
 	sc.conn = conn
-	sc.isConnected = true
 
 	// 设置读取超时
 	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
@@ -89,13 +93,13 @@ func (sc *StreamingClient) Connect(sampleRate int, agentId string, threshold flo
 	var connectionMsg map[string]interface{}
 	if err := conn.ReadJSON(&connectionMsg); err != nil {
 		conn.Close()
-		sc.isConnected = false
+		sc.conn = nil
 		return fmt.Errorf("读取连接确认消息失败: %v", err)
 	}
 
 	if msgType, ok := connectionMsg["type"].(string); !ok || msgType != "connection" {
 		conn.Close()
-		sc.isConnected = false
+		sc.conn = nil
 		return fmt.Errorf("意外的连接消息: %v", connectionMsg)
 	}
 
@@ -108,7 +112,7 @@ func (sc *StreamingClient) SendAudioChunk(audioData []float32) error {
 	sc.mutex.Lock()
 	defer sc.mutex.Unlock()
 
-	if !sc.isConnected || sc.conn == nil {
+	if sc.conn == nil {
 		return fmt.Errorf("not connected")
 	}
 
@@ -117,6 +121,8 @@ func (sc *StreamingClient) SendAudioChunk(audioData []float32) error {
 
 	// 发送二进制消息
 	if err := sc.conn.WriteMessage(websocket.BinaryMessage, chunkBytes); err != nil {
+		// 发送失败时关闭连接
+		sc.closeConnectionLocked()
 		return fmt.Errorf("发送音频数据失败: %v", err)
 	}
 
@@ -128,7 +134,7 @@ func (sc *StreamingClient) FinishAndIdentify() (*IdentifyResult, error) {
 	sc.mutex.Lock()
 	defer sc.mutex.Unlock()
 
-	if !sc.isConnected || sc.conn == nil {
+	if sc.conn == nil {
 		return nil, fmt.Errorf("not connected")
 	}
 
@@ -137,6 +143,7 @@ func (sc *StreamingClient) FinishAndIdentify() (*IdentifyResult, error) {
 		"action": "finish",
 	}
 	if err := sc.conn.WriteJSON(finishCmd); err != nil {
+		sc.closeConnectionLocked()
 		return nil, fmt.Errorf("发送完成命令失败: %v", err)
 	}
 
@@ -147,6 +154,7 @@ func (sc *StreamingClient) FinishAndIdentify() (*IdentifyResult, error) {
 	for {
 		messageType, message, err := sc.conn.ReadMessage()
 		if err != nil {
+			sc.closeConnectionLocked()
 			return nil, fmt.Errorf("读取消息失败: %v", err)
 		}
 
@@ -160,6 +168,7 @@ func (sc *StreamingClient) FinishAndIdentify() (*IdentifyResult, error) {
 			if msgType, ok := msg["type"].(string); ok {
 				switch msgType {
 				case "result":
+					// 连接保持打开，供下次识别复用
 					if resultData, ok := msg["result"].(map[string]interface{}); ok {
 						result := &IdentifyResult{
 							Identified:  getBool(resultData, "identified"),
@@ -171,6 +180,7 @@ func (sc *StreamingClient) FinishAndIdentify() (*IdentifyResult, error) {
 						return result, nil
 					}
 				case "error":
+					sc.closeConnectionLocked()
 					if errMsg, ok := msg["message"].(string); ok {
 						return nil, fmt.Errorf("服务器错误: %s", errMsg)
 					}
@@ -184,14 +194,16 @@ func (sc *StreamingClient) FinishAndIdentify() (*IdentifyResult, error) {
 func (sc *StreamingClient) Close() error {
 	sc.mutex.Lock()
 	defer sc.mutex.Unlock()
+	return sc.closeConnectionLocked()
+}
 
+// closeConnectionLocked 关闭连接（必须在已持有 mutex 的情况下调用）
+func (sc *StreamingClient) closeConnectionLocked() error {
 	if sc.conn != nil {
 		err := sc.conn.Close()
 		sc.conn = nil
-		sc.isConnected = false
 		return err
 	}
-
 	return nil
 }
 
@@ -199,7 +211,21 @@ func (sc *StreamingClient) Close() error {
 func (sc *StreamingClient) IsConnected() bool {
 	sc.mutex.Lock()
 	defer sc.mutex.Unlock()
-	return sc.isConnected
+	return sc.conn != nil
+}
+
+// pingConnectionLocked 使用 Ping 检测连接是否有效（必须在已持有 mutex 的情况下调用）
+func (sc *StreamingClient) pingConnectionLocked() bool {
+	if sc.conn == nil {
+		return false
+	}
+
+	// 使用 Ping 消息检测连接活性
+	sc.conn.SetWriteDeadline(time.Now().Add(1000 * time.Millisecond))
+	err := sc.conn.WriteMessage(websocket.PingMessage, nil)
+	sc.conn.SetWriteDeadline(time.Time{})
+
+	return err == nil
 }
 
 // float32ToBytes 将 float32 数组转换为二进制字节（小端序）

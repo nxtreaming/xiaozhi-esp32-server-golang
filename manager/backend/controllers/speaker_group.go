@@ -193,15 +193,17 @@ func (sgc *SpeakerGroupController) GetSpeakerGroups(c *gin.Context) {
 	result := make([]gin.H, 0)
 	for _, sg := range speakerGroups {
 		result = append(result, gin.H{
-			"id":           sg.ID,
-			"agent_id":     sg.AgentID,
-			"agent_name":   agentMap[sg.AgentID],
-			"name":         sg.Name,
-			"prompt":       sg.Prompt,
-			"description":  sg.Description,
-			"sample_count": sg.SampleCount,
-			"created_at":   sg.CreatedAt,
-			"updated_at":   sg.UpdatedAt,
+			"id":            sg.ID,
+			"agent_id":      sg.AgentID,
+			"agent_name":    agentMap[sg.AgentID],
+			"name":          sg.Name,
+			"prompt":        sg.Prompt,
+			"description":   sg.Description,
+			"tts_config_id": sg.TTSConfigID,
+			"voice":         sg.Voice,
+			"sample_count":  sg.SampleCount,
+			"created_at":    sg.CreatedAt,
+			"updated_at":    sg.UpdatedAt,
 		})
 	}
 
@@ -261,15 +263,17 @@ func (sgc *SpeakerGroupController) GetSpeakerGroup(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"data": gin.H{
-			"id":           speakerGroup.ID,
-			"agent_id":     speakerGroup.AgentID,
-			"agent_name":   agent.Name,
-			"name":         speakerGroup.Name,
-			"prompt":       speakerGroup.Prompt,
-			"description":  speakerGroup.Description,
-			"sample_count": speakerGroup.SampleCount,
-			"samples":      sampleList,
-			"created_at":   speakerGroup.CreatedAt,
+			"id":            speakerGroup.ID,
+			"agent_id":      speakerGroup.AgentID,
+			"agent_name":    agent.Name,
+			"name":          speakerGroup.Name,
+			"prompt":        speakerGroup.Prompt,
+			"description":   speakerGroup.Description,
+			"tts_config_id": speakerGroup.TTSConfigID,
+			"voice":         speakerGroup.Voice,
+			"sample_count":  speakerGroup.SampleCount,
+			"samples":       sampleList,
+			"created_at":    speakerGroup.CreatedAt,
 		},
 	})
 }

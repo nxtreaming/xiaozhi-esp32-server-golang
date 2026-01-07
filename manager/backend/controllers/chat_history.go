@@ -58,10 +58,22 @@ func (c *ChatHistoryController) SaveMessage(ctx *gin.Context) {
 		return
 	}
 
+	// 如果请求中没有提供 AgentID，使用设备关联的 AgentID
+	agentID := req.AgentID
+	if agentID == "" && device.AgentID > 0 {
+		agentID = fmt.Sprintf("%d", device.AgentID)
+	}
+
+	// 如果 AgentID 仍然为空，跳过保存
+	if agentID == "" {
+		ctx.JSON(http.StatusOK, gin.H{"message": "跳过保存: 没有关联的 AgentID"})
+		return
+	}
+
 	message := &models.ChatMessage{
 		MessageID: req.MessageID,
 		DeviceID:  req.DeviceID,
-		AgentID:   req.AgentID,
+		AgentID:   agentID,
 		UserID:    device.UserID,
 		SessionID: req.SessionID,
 		Role:      req.Role,
@@ -198,7 +210,7 @@ func (c *ChatHistoryController) GetMessages(ctx *gin.Context) {
 
 	var messages []models.ChatMessage
 	offset := (page - 1) * pageSize
-	if err := query.Order("created_at ASC").
+	if err := query.Order("created_at DESC").
 		Limit(pageSize).Offset(offset).
 		Find(&messages).Error; err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "查询失败"})
@@ -533,10 +545,17 @@ func (c *ChatHistoryController) UpdateMessageAudio(ctx *gin.Context) {
 	var message models.ChatMessage
 	if err := c.DB.Where("message_id = ?", messageID).First(&message).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			ctx.JSON(http.StatusNotFound, gin.H{"error": "消息不存在"})
+			// 消息不存在，跳过更新（可能是因为 SaveMessage 时没有 AgentID 而被跳过）
+			ctx.JSON(http.StatusOK, gin.H{"message": "跳过更新: 消息不存在"})
 			return
 		}
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "查询消息失败"})
+		return
+	}
+
+	// 如果消息没有关联的 AgentID，跳过更新
+	if message.AgentID == "" {
+		ctx.JSON(http.StatusOK, gin.H{"message": "跳过更新: 没有关联的 AgentID"})
 		return
 	}
 
