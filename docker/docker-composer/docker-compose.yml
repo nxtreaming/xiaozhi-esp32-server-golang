@@ -67,6 +67,7 @@ services:
       - DB_PASSWORD=password
       - DB_NAME=xiaozhi_admin
       - AUDIO_BASE_PATH=/data/chat_history/audio
+      - SPEAKER_SERVICE_URL=http://voice-server:8080
     volumes:
       - ../../manager/backend/config:/root/config
       - backend_audio_data:/data/chat_history/audio
@@ -86,9 +87,45 @@ services:
       - xiaozhi-network
     restart: unless-stopped
 
+  # Qdrant向量数据库服务（用于说话人识别）
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: xiaozhi-qdrant
+    ports:
+      - "6333:6333"         # REST API 端口
+      - "6334:6334"         # gRPC 端口
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - xiaozhi-network
+    restart: unless-stopped
+
+  # ASR语音识别服务（说话人识别）
+  voice-server:
+    image: ghcr.io/hackers365/voice_server:0.1.0    # 替换为实际的镜像名称
+    container_name: xiaozhi-voice-server
+    ports:
+      - "8082:8080"         # ASR服务端口 映射至宿主机 8082
+    depends_on:
+      - qdrant
+    environment:
+      - VAD_ASR_SPEAKER_ENABLED=true
+      - VAD_ASR_SPEAKER_VECTOR_DB_HOST=qdrant
+      - VAD_ASR_SPEAKER_VECTOR_DB_PORT=6334
+      - VAD_ASR_SPEAKER_VECTOR_DB_COLLECTION_NAME=speaker_embeddings
+      - VAD_ASR_SPEAKER_THRESHOLD=0.6
+      - VAD_ASR_LOGGING_LEVEL=info
+    volumes:
+      - asr_data:/app/data
+    networks:
+      - xiaozhi-network
+    restart: unless-stopped
+
 volumes:
   mysql_data:
   backend_audio_data:
+  qdrant_data:
+  asr_data:
 
 networks:
   xiaozhi-network:

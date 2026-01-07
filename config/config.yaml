@@ -334,3 +334,8 @@ wakeup_words:
   - "小智"
   - "小知"
   - "你好小智"
+
+voice_identify:
+  enable: true
+  base_url: "http://192.168.208.214:8080"
+  threshold: 0.6  # 声纹识别阈值，范围 0.0-1.0，默认 0.6
