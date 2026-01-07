@@ -439,22 +439,20 @@ func (ac *AdminController) GetSystemConfigs(c *gin.Context) {
 		enabled = selectedConfig.Enabled
 
 		// 如果环境变量未定义，从数据库配置获取 base_url 和 threshold
-		if baseURL == "" {
-			if selectedConfig.JsonData != "" {
-				var configData map[string]interface{}
-				if err := json.Unmarshal([]byte(selectedConfig.JsonData), &configData); err == nil {
-					// 从 service.base_url 提取 base_url，与控制台配置结构一致
-					if service, ok := configData["service"].(map[string]interface{}); ok {
-						if url, ok := service["base_url"].(string); ok && url != "" && baseURL == "" {
-							baseURL = url
-						}
-						// 读取阈值配置
-						if thresholdVal, ok := service["threshold"]; ok {
-							if thresholdFloat, ok := thresholdVal.(float64); ok {
-								// 验证阈值范围
-								if thresholdFloat >= 0 && thresholdFloat <= 1 {
-									threshold = thresholdFloat
-								}
+		if selectedConfig.JsonData != "" {
+			var configData map[string]interface{}
+			if err := json.Unmarshal([]byte(selectedConfig.JsonData), &configData); err == nil {
+				// 从 service.base_url 提取 base_url，与控制台配置结构一致
+				if service, ok := configData["service"].(map[string]interface{}); ok {
+					if url, ok := service["base_url"].(string); ok && url != "" && baseURL == "" {
+						baseURL = url
+					}
+					// 读取阈值配置
+					if thresholdVal, ok := service["threshold"]; ok {
+						if thresholdFloat, ok := thresholdVal.(float64); ok {
+							// 验证阈值范围
+							if thresholdFloat >= 0 && thresholdFloat <= 1 {
+								threshold = thresholdFloat
 							}
 						}
 					}
