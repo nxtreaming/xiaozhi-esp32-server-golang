@@ -13,6 +13,7 @@ xiaozhi-esp32-server-golang 是一款高性能、全流式的 AI 后端服务，
 ## ✨ 主要特性 | Key Features
 
 - 🚀 **端到端全流式 AI 语音链路**：ASR（自动语音识别）、LLM（大语言模型）、TTS（语音合成）全流程流式处理，极致低延迟，适配实时语音交互场景。
+- 🎤 **声纹识别与动态TTS切换**：支持说话人身份识别，根据识别结果动态切换TTS音色，实现个性化语音交互体验。
 - 🧩 **主逻辑代码梳理与优化**：对主流程代码结构进行系统性梳理与重构，提升可读性、可维护性与扩展性。
 - 🛠️ **Transport 接口层抽象**：将 WebSocket、MQTT、UDP 等协议统一抽象为 Transport 接口层，灵活注入主逻辑，便于协议扩展与切换。
 - 📬 **LLM/TTS 消息队列化处理**：LLM 与 TTS 处理流程采用消息队列方式，支持异步处理与新业务逻辑的灵活注入。
@@ -85,6 +86,7 @@ xiaozhi-esp32-server-golang 是一款高性能、全流式的 AI 后端服务，
    - [MQTT+UDP 服务器配置流程 »](doc/mqtt_udp.md)
    - [MQTT UDP 协议与数据流程 »](doc/mqtt_udp_protocol.md)
    - [Vision 视觉识别 »](doc/vision.md)
+   - [声纹识别功能说明 »](doc/speaker_identification.md)
    - [MCP 架构 »](doc/mcp.md)
    - [MCP 音频服务说明(支持分页获取资源) »](doc/mcp_resource.md)
 
@@ -106,6 +108,7 @@ xiaozhi-esp32-server-golang 是一款高性能、全流式的 AI 后端服务，
 | TTS       | 语音合成（多引擎支持）        | Doubao, EdgeTTS, CosyVoice |
 | MCP       | 多协议接入 | 支持全局MCP、MCP接入点、端侧MCP Server）       |
 | 视觉      | 视觉处理相关能力                                    |  支持 doubao, aliyun 视觉模型      |
+| 声纹识别  | 说话人身份识别与动态TTS切换    | sherpa-onnx, Qdrant 向量数据库      |
 
 ---
 
