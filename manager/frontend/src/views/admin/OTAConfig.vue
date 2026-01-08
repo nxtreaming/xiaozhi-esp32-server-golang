@@ -48,6 +48,9 @@
               :prefix-icon="Key"
               show-password
             />
+            <div class="form-item-hint">
+              用来生成连接mqtt server的用户名和密码，必须与 mqtt server配置页面中的'签名密钥' 中的一致
+            </div>
           </el-form-item>
         </el-card>
         
@@ -611,6 +614,13 @@ onMounted(() => {
 /* 表单项样式 */
 .form-item {
   margin-bottom: 0;
+}
+
+.form-item-hint {
+  margin-top: 0.5rem;
+  font-size: 0.875rem;
+  color: #6b7280;
+  line-height: 1.5;
 }
 
 :deep(.el-form-item__label) {

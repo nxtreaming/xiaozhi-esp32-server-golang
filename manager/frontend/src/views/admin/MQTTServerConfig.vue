@@ -99,6 +99,9 @@
             
             <el-form-item label="签名密钥" prop="signature_key" class="form-item">
               <el-input v-model="form.signature_key" placeholder="请输入签名密钥" style="max-width: 400px" />
+              <div class="form-item-hint">
+                与ota配置页面签名密钥对应
+              </div>
             </el-form-item>
           </div>
         </el-card>
@@ -541,6 +544,13 @@ onMounted(() => {
 
 .form-item {
   margin-bottom: 0;
+}
+
+.form-item-hint {
+  margin-top: 0.5rem;
+  font-size: 0.875rem;
+  color: #6b7280;
+  line-height: 1.5;
 }
 
 .form-item-with-help {

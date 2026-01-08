@@ -47,8 +47,13 @@ func GetTTSProvider(providerName string, config map[string]interface{}) (TTSProv
 		return nil, fmt.Errorf("不支持的TTS提供者: %s", providerName)
 	}
 
+	if baseProvider == nil {
+		return nil, fmt.Errorf("无法创建TTS提供者: %s", providerName)
+	}
+
 	// 使用适配器包装基础提供者，转换为完整的TTSProvider
 	provider := &ContextTTSAdapter{baseProvider}
+
 	return provider, nil
 }
 

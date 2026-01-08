@@ -96,9 +96,9 @@ func (c *Client) doRequestOnce(ctx context.Context, opts RequestOptions) error {
 	}
 
 	// 检查HTTP状态码
-	if resp.StatusCode >= 400 {
+	/*if resp.StatusCode >= 400 {
 		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
-	}
+	}*/
 
 	// 解析响应体
 	if opts.Response != nil {

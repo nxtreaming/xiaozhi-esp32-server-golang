@@ -53,7 +53,10 @@ func (dac *DeviceActivationController) CheckDeviceActivation(c *gin.Context) {
 	//clientId := c.Query("client_id")
 
 	if deviceId == "" /*|| clientId == ""*/ {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "device_id和client_id参数必填"})
+		c.JSON(http.StatusOK, gin.H{
+			"activated": false,
+			"error":     "device_id参数必填",
+		})
 		return
 	}
 
@@ -67,7 +70,10 @@ func (dac *DeviceActivationController) CheckDeviceActivation(c *gin.Context) {
 			})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询设备失败"})
+		c.JSON(http.StatusOK, gin.H{
+			"activated": false,
+			"error":     "查询设备失败",
+		})
 		return
 	}
 
@@ -198,7 +204,7 @@ func (dac *DeviceActivationController) ActivateDevice(c *gin.Context) {
 	// 使用device_id (对应device_name字段) 查找设备
 	if err := dac.DB.Where("device_name = ?", req.DeviceId).First(&device).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
+			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"error":   "设备不存在",
 			})
@@ -221,7 +227,7 @@ func (dac *DeviceActivationController) ActivateDevice(c *gin.Context) {
 	}
 
 	if device.UserID == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{
+		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"error":   "设备未绑定用户",
 		})
@@ -229,7 +235,7 @@ func (dac *DeviceActivationController) ActivateDevice(c *gin.Context) {
 	}
 
 	if device.Challenge != req.Challenge {
-		c.JSON(http.StatusBadRequest, gin.H{
+		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"error":   "挑战码错误",
 		})
@@ -238,7 +244,7 @@ func (dac *DeviceActivationController) ActivateDevice(c *gin.Context) {
 
 	// 验证HMAC（如果pre_secret_key为空则直接通过）
 	if !verifyHMAC(req.Challenge, device.PreSecretKey, req.Hmac) {
-		c.JSON(http.StatusBadRequest, gin.H{
+		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"error":   "HMAC验证失败",
 		})
