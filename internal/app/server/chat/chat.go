@@ -12,7 +12,6 @@ import (
 	. "xiaozhi-esp32-server-golang/internal/data/client"
 	userconfig "xiaozhi-esp32-server-golang/internal/domain/config"
 	"xiaozhi-esp32-server-golang/internal/domain/eventbus"
-	"xiaozhi-esp32-server-golang/internal/domain/vad/silero_vad"
 	log "xiaozhi-esp32-server-golang/logger"
 )
 
@@ -75,10 +74,6 @@ func GenClientState(pctx context.Context, deviceID string) (*ClientState, error)
 	if err != nil {
 		log.Errorf("获取 设备 %s 配置失败: %+v", deviceID, err)
 		return nil, err
-	}
-
-	if deviceConfig.Vad.Provider == "silero_vad" {
-		silero_vad.InitVadPool(deviceConfig.Vad.Config)
 	}
 
 	// 创建带取消功能的上下文

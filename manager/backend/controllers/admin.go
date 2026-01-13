@@ -227,11 +227,11 @@ func (ac *AdminController) GetDeviceConfigs(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": response})
 }
 
-// GetSystemConfigs 获取系统配置信息，包括mqtt, mqtt_server, udp, ota, mcp, local_mcp, voice_identify, tts
+// GetSystemConfigs 获取系统配置信息，包括mqtt, mqtt_server, udp, ota, mcp, local_mcp, voice_identify, tts, vad
 func (ac *AdminController) GetSystemConfigs(c *gin.Context) {
 	// 一次性获取所有相关配置（包括启用和未启用的）
 	var allConfigs []models.Config
-	if err := ac.DB.Where("type IN (?)", []string{"mqtt", "mqtt_server", "udp", "ota", "mcp", "local_mcp", "voice_identify", "tts"}).Find(&allConfigs).Error; err != nil {
+	if err := ac.DB.Where("type IN (?)", []string{"mqtt", "mqtt_server", "udp", "ota", "mcp", "local_mcp", "voice_identify", "tts", "vad"}).Find(&allConfigs).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get system configs"})
 		return
 	}
@@ -490,6 +490,11 @@ func (ac *AdminController) GetSystemConfigs(c *gin.Context) {
 			}
 		}
 		response["all_tts_configs"] = allTTSConfigs
+	}
+
+	// 处理 VAD 配置
+	if configs, exists := configsByType["vad"]; exists && len(configs) > 0 {
+		response["vad"] = selectAndParseConfig(configs)
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": response})

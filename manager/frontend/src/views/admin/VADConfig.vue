@@ -70,6 +70,7 @@
           <el-select v-model="form.provider" placeholder="请选择提供商" style="width: 100%">
             <el-option label="WebRTC VAD" value="webrtc_vad" />
             <el-option label="Silero VAD" value="silero_vad" />
+            <el-option label="TEN VAD" value="ten_vad" />
           </el-select>
         </el-form-item>
         
@@ -146,6 +147,27 @@
             <el-input-number v-model="form.silero_vad.acquire_timeout_ms" :min="100" :max="30000" style="width: 100%" />
           </el-form-item>
         </template>
+
+        <!-- TEN VAD 配置 -->
+        <template v-if="form.provider === 'ten_vad'">
+          <el-divider content-position="left">TEN VAD 配置</el-divider>
+          <el-form-item label="帧移大小" prop="ten_vad.hop_size">
+            <el-input-number v-model="form.ten_vad.hop_size" :min="128" :max="1024" style="width: 100%" />
+            <div style="font-size: 12px; color: #909399; margin-top: 4px;">推荐值：512</div>
+          </el-form-item>
+          <el-form-item label="VAD检测阈值" prop="ten_vad.threshold">
+            <el-input-number v-model="form.ten_vad.threshold" :min="0" :max="1" :step="0.1" :precision="2" style="width: 100%" />
+            <div style="font-size: 12px; color: #909399; margin-top: 4px;">推荐值：0.3</div>
+          </el-form-item>
+          <el-form-item label="连接池大小" prop="ten_vad.pool_size">
+            <el-input-number v-model="form.ten_vad.pool_size" :min="1" :max="100" style="width: 100%" />
+            <div style="font-size: 12px; color: #909399; margin-top: 4px;">推荐值：10</div>
+          </el-form-item>
+          <el-form-item label="获取超时时间(ms)" prop="ten_vad.acquire_timeout_ms">
+            <el-input-number v-model="form.ten_vad.acquire_timeout_ms" :min="100" :max="30000" style="width: 100%" />
+            <div style="font-size: 12px; color: #909399; margin-top: 4px;">推荐值：3000</div>
+          </el-form-item>
+        </template>
       </el-form>
       
       <template #footer>
@@ -192,6 +214,12 @@ const form = reactive({
     channels: 1,
     pool_size: 10,
     acquire_timeout_ms: 3000
+  },
+  ten_vad: {
+    hop_size: 512,
+    threshold: 0.3,
+    pool_size: 10,
+    acquire_timeout_ms: 3000
   }
 })
 
@@ -201,6 +229,8 @@ const generateConfig = () => {
     return JSON.stringify({ webrtc_vad: form.webrtc_vad })
   } else if (form.provider === 'silero_vad') {
     return JSON.stringify({ silero_vad: form.silero_vad })
+  } else if (form.provider === 'ten_vad') {
+    return JSON.stringify({ ten_vad: form.ten_vad })
   }
   return '{}'
 }
@@ -220,7 +250,11 @@ const rules = {
   'silero_vad.sample_rate': [{ required: true, message: '请选择采样率', trigger: 'change' }],
   'silero_vad.channels': [{ required: true, message: '请选择声道数', trigger: 'change' }],
   'silero_vad.pool_size': [{ required: true, message: '请输入连接池大小', trigger: 'blur' }],
-  'silero_vad.acquire_timeout_ms': [{ required: true, message: '请输入获取超时时间', trigger: 'blur' }]
+  'silero_vad.acquire_timeout_ms': [{ required: true, message: '请输入获取超时时间', trigger: 'blur' }],
+  'ten_vad.hop_size': [{ required: true, message: '请输入帧移大小', trigger: 'blur' }],
+  'ten_vad.threshold': [{ required: true, message: '请输入VAD检测阈值', trigger: 'blur' }],
+  'ten_vad.pool_size': [{ required: true, message: '请输入连接池大小', trigger: 'blur' }],
+  'ten_vad.acquire_timeout_ms': [{ required: true, message: '请输入获取超时时间', trigger: 'blur' }]
 }
 
 const loadConfigs = async () => {
@@ -251,6 +285,9 @@ const editConfig = (config) => {
     }
     if (configObj.silero_vad) {
       form.silero_vad = { ...form.silero_vad, ...configObj.silero_vad }
+    }
+    if (configObj.ten_vad) {
+      form.ten_vad = { ...form.ten_vad, ...configObj.ten_vad }
     }
   } catch (error) {
     console.error('解析配置JSON失败:', error)
@@ -380,6 +417,12 @@ const resetForm = () => {
       min_silence_duration_ms: 100,
       sample_rate: 16000,
       channels: 1,
+      pool_size: 10,
+      acquire_timeout_ms: 3000
+    },
+    ten_vad: {
+      hop_size: 512,
+      threshold: 0.3,
       pool_size: 10,
       acquire_timeout_ms: 3000
     }

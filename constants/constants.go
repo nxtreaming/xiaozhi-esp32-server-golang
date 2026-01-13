@@ -3,6 +3,7 @@ package constants
 const (
 	VadTypeSileroVad = "silero_vad"
 	VadTypeWebRTCVad = "webrtc_vad"
+	VadTypeTenVad    = "ten_vad"
 )
 
 const (

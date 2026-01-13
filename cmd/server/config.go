@@ -12,6 +12,7 @@ import (
 	"xiaozhi-esp32-server-golang/internal/app/server/auth"
 	redisdb "xiaozhi-esp32-server-golang/internal/db/redis"
 	user_config "xiaozhi-esp32-server-golang/internal/domain/config"
+	"xiaozhi-esp32-server-golang/internal/domain/vad"
 
 	log "xiaozhi-esp32-server-golang/logger"
 
@@ -55,7 +56,7 @@ func Init(configFile string) error {
 	startPeriodicConfigUpdate()
 
 	//init vad
-	//initVad()
+	initVad()
 
 	//init redis
 	initRedis()
@@ -224,17 +225,23 @@ func initLog() error {
 	return nil
 }
 
-/*
-	func initVad() error {
-		err := vad.InitVAD()
-		if err != nil {
-			fmt.Printf("initVad error: %v\n", err)
-			os.Exit(1)
-			return err
-		}
-		return nil
+func initVad() error {
+	log.Infof("开始初始化 VAD 模块...")
+	vadProvider := viper.GetString("vad.provider")
+	log.Infof("VAD 提供商: %s", vadProvider)
+
+	err := vad.InitVAD()
+	if err != nil {
+		log.Errorf("VAD 初始化失败: %v", err)
+		fmt.Printf("initVad error: %v\n", err)
+		os.Exit(1)
+		return err
 	}
-*/
+
+	log.Infof("VAD 模块初始化成功")
+	return nil
+}
+
 func initRedis() error {
 	// 初始化我们的统一Redis模块
 	redisConfig := &redisdb.Config{

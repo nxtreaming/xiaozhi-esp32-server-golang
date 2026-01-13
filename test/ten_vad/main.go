@@ -8,9 +8,14 @@ import (
 	"log"
 	"math"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"xiaozhi-esp32-server-golang/internal/domain/audio"
-	"xiaozhi-esp32-server-golang/internal/domain/vad/webrtc_vad"
+	"xiaozhi-esp32-server-golang/internal/domain/vad/ten_vad"
+
+	goaudio "github.com/go-audio/audio"
+	"github.com/go-audio/wav"
 )
 
 func genFloat32Empty(sampleRate int, durationMs int, channels int, count int) [][]float32 {
@@ -70,11 +75,29 @@ func genOpusFloat32Empty(sampleRate int, durationMs int, channels int, count int
 
 func main() {
 	// 检查命令行参数
-	if len(os.Args) != 2 {
-		log.Fatalf("用法: %s <wav文件路径>", os.Args[0])
+	if len(os.Args) < 2 {
+		log.Fatalf("用法: %s <wav文件路径> [hop_size] [threshold]\n示例: %s test.wav 512 0.3", os.Args[0], os.Args[0])
 	}
 
 	wavFilePath := os.Args[1]
+
+	// 解析可选参数
+	hopSize := 512
+	threshold := 0.3
+	if len(os.Args) >= 3 {
+		_, err := fmt.Sscanf(os.Args[2], "%d", &hopSize)
+		if err != nil {
+			log.Printf("无效的 hop_size 参数，使用默认值 512")
+			hopSize = 512
+		}
+	}
+	if len(os.Args) >= 4 {
+		_, err := fmt.Sscanf(os.Args[3], "%f", &threshold)
+		if err != nil {
+			log.Printf("无效的 threshold 参数，使用默认值 0.3")
+			threshold = 0.3
+		}
+	}
 
 	// 读取WAV文件
 	wavFile, err := os.Open(wavFilePath)
@@ -92,7 +115,7 @@ func main() {
 	fmt.Printf("成功读取WAV文件: %s (%d 字节)\n", wavFilePath, len(wavData))
 
 	// 调用 Wav2Pcm 函数转换WAV数据为PCM数据
-	// 使用WebRTC VAD支持的标准参数：16000Hz采样率，单声道
+	// 使用TEN-VAD支持的标准参数：16000Hz采样率，单声道
 	sampleRate := 16000
 	channels := 1
 
@@ -105,26 +128,26 @@ func main() {
 
 	fmt.Printf("成功转换为PCM数据，共 %d 帧（每帧20ms）\n", len(pcmFloat32))
 
-	// 创建WebRTC VAD实例
-	vadImpl, err := webrtc_vad.NewWebRTCVADWithConfig(sampleRate, 2) // 模式2：中等敏感度
+	// 创建TEN-VAD实例
+	config := map[string]interface{}{
+		"hop_size":  hopSize,
+		"threshold": threshold,
+	}
+	vadImpl, err := ten_vad.NewTenVAD(config)
 	if err != nil {
-		log.Fatalf("创建WebRTC VAD失败: %v", err)
+		log.Fatalf("创建TEN-VAD失败: %v", err)
 	}
 	defer vadImpl.Close()
 
-	fmt.Println("WebRTC VAD创建成功，开始测试...")
+	fmt.Printf("TEN-VAD创建成功 (hop_size=%d, threshold=%.2f)，开始测试...\n", hopSize, threshold)
 
 	// 直接测试VAD是否能正常工作
 	if len(pcmFloat32) == 0 {
 		log.Fatalf("没有PCM数据可供处理")
 	}
 
-	// WebRTC VAD 需要 320 样本（20ms @ 16000Hz）的帧
-	// Wav2Pcm 已经按 20ms 分帧，每帧正好是 320 样本
-	frameSize := 320 // 20ms @ 16000Hz
-
-	// 将所有帧合并成连续的音频数据，然后按 frameSize 重新分帧
-	// 这样可以确保每帧都是完整的 frameSize
+	// 将所有帧合并成连续的音频数据
+	// 因为 TEN-VAD 需要按 hopSize 分帧，而不是按 20ms 分帧
 	totalSamples := 0
 	for _, frame := range pcmFloat32 {
 		totalSamples += len(frame)
@@ -157,24 +180,25 @@ func main() {
 
 	fmt.Println("开始进行语音活动检测...")
 
-	// 按 frameSize 分帧进行检测
+	// 按 hopSize 分帧进行检测
 	detectVoice := func(pcmData []float32) {
 		speechFrames := 0
 		totalFrames := 0
+		var speechFramesData []float32 // 收集所有有声音的帧
 
-		// 按 frameSize 分帧处理
-		for i := 0; i < len(pcmData); i += frameSize {
-			end := i + frameSize
+		// 按 hopSize 分帧处理
+		for i := 0; i < len(pcmData); i += hopSize {
+			end := i + hopSize
 			if end > len(pcmData) {
 				end = len(pcmData)
 			}
 
 			frame := pcmData[i:end]
 
-			// 如果帧长度不足 frameSize，填充零
-			if len(frame) < frameSize {
-				// 填充零到 frameSize 长度
-				paddedFrame := make([]float32, frameSize)
+			// 如果帧长度不足 hopSize，填充零或跳过
+			if len(frame) < hopSize {
+				// 填充零到 hopSize 长度
+				paddedFrame := make([]float32, hopSize)
 				copy(paddedFrame, frame)
 				frame = paddedFrame
 			}
@@ -182,18 +206,21 @@ func main() {
 			totalFrames++
 
 			// 进行VAD检测
-			isVoice, err := vadImpl.IsVADExt(frame, sampleRate, frameSize)
+			isVoice, err := vadImpl.IsVADExt(frame, sampleRate, hopSize)
 			if err != nil {
 				log.Printf("第%d帧VAD检测失败: %v", totalFrames, err)
 				// 如果是第一帧就失败，说明VAD未正确初始化
 				if totalFrames == 1 {
-					log.Fatalf("VAD初始化失败，请检查WebRTC VAD配置和库文件")
+					log.Fatalf("VAD初始化失败，请检查TEN-VAD配置和库文件")
 				}
 				continue
 			}
 
 			if isVoice {
 				speechFrames++
+				// 收集有声音的帧数据（使用原始帧，不包含填充）
+				originalFrame := pcmData[i:end]
+				speechFramesData = append(speechFramesData, originalFrame...)
 				fmt.Printf("第%d帧: 检测到语音活动 (样本范围: %d-%d)\n", totalFrames, i, end-1)
 			} else {
 				fmt.Printf("第%d帧: 无语音活动 (样本范围: %d-%d)\n", totalFrames, i, end-1)
@@ -203,20 +230,30 @@ func main() {
 		// 输出统计结果
 		speechPercentage := float64(speechFrames) / float64(totalFrames) * 100
 		nonSpeechFrames := totalFrames - speechFrames
-		fmt.Printf("\n=== WebRTC VAD检测结果统计 ===\n")
-		fmt.Printf("总帧数: %d (每帧 %d 样本, %.2f ms)\n", totalFrames, frameSize, float64(frameSize)/float64(sampleRate)*1000)
+		fmt.Printf("\n=== TEN-VAD检测结果统计 ===\n")
+		fmt.Printf("总帧数: %d (每帧 %d 样本, %.2f ms)\n", totalFrames, hopSize, float64(hopSize)/float64(sampleRate)*1000)
 		fmt.Printf("语音帧数: %d\n", speechFrames)
 		fmt.Printf("非语音帧数: %d\n", nonSpeechFrames)
 		fmt.Printf("语音活动比例: %.2f%%\n", speechPercentage)
 
 		if speechFrames > 0 {
 			fmt.Println("结论: 检测到语音活动")
+
+			// 保存有声音的帧到WAV文件
+			outputFileName := generateOutputFileName(wavFilePath)
+			err := saveFloat32ToWav(speechFramesData, outputFileName, sampleRate, channels)
+			if err != nil {
+				log.Printf("保存有声音的帧到WAV文件失败: %v", err)
+			} else {
+				fmt.Printf("成功将有声音的帧保存到: %s (共 %d 个样本, %.2f 秒)\n",
+					outputFileName, len(speechFramesData), float64(len(speechFramesData))/float64(sampleRate))
+			}
 		} else {
 			fmt.Println("结论: 未检测到语音活动")
 		}
 	}
 
-	// 使用实际的WAV文件数据进行测试
+	// 使用合并后的完整音频数据进行测试
 	detectVoice(allPcmData)
 }
 
@@ -226,4 +263,73 @@ func float32ToByte(pcmFrame []float32) []byte {
 		binary.LittleEndian.PutUint32(byteData[i*4:], math.Float32bits(sample))
 	}
 	return byteData
+}
+
+// generateOutputFileName 生成输出文件名，在原文件名基础上添加 "_speech" 后缀
+func generateOutputFileName(inputPath string) string {
+	dir := filepath.Dir(inputPath)
+	baseName := filepath.Base(inputPath)
+	ext := filepath.Ext(baseName)
+	nameWithoutExt := strings.TrimSuffix(baseName, ext)
+	outputName := nameWithoutExt + "_speech" + ext
+	return filepath.Join(dir, outputName)
+}
+
+// saveFloat32ToWav 将 float32 PCM 数据保存为 WAV 文件
+func saveFloat32ToWav(pcmData []float32, fileName string, sampleRate int, channels int) error {
+	// 创建输出文件
+	wavFile, err := os.Create(fileName)
+	if err != nil {
+		return fmt.Errorf("创建WAV文件失败: %v", err)
+	}
+	defer wavFile.Close()
+
+	// 创建WAV编码器
+	wavEncoder := wav.NewEncoder(wavFile, sampleRate, 16, channels, 1)
+
+	// 将 float32 转换为 int16
+	// float32 范围通常是 [-1.0, 1.0]，需要缩放到 int16 范围 [-32768, 32767]
+	intData := make([]int, len(pcmData))
+	for i, sample := range pcmData {
+		// 限制范围到 [-1.0, 1.0]
+		if sample > 1.0 {
+			sample = 1.0
+		}
+		if sample < -1.0 {
+			sample = -1.0
+		}
+		// 转换为 int16 范围
+		intSample := int(sample * 32767.0)
+		if intSample > 32767 {
+			intSample = 32767
+		}
+		if intSample < -32768 {
+			intSample = -32768
+		}
+		intData[i] = intSample
+	}
+
+	// 创建音频缓冲区
+	audioBuf := &goaudio.IntBuffer{
+		Format: &goaudio.Format{
+			NumChannels: channels,
+			SampleRate:  sampleRate,
+		},
+		SourceBitDepth: 16,
+		Data:           intData,
+	}
+
+	// 写入WAV文件
+	err = wavEncoder.Write(audioBuf)
+	if err != nil {
+		return fmt.Errorf("写入WAV文件失败: %v", err)
+	}
+
+	// 关闭编码器
+	err = wavEncoder.Close()
+	if err != nil {
+		return fmt.Errorf("关闭WAV编码器失败: %v", err)
+	}
+
+	return nil
 }

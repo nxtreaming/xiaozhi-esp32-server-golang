@@ -87,7 +87,7 @@ udp:
 
 # 语音活动检测（VAD）配置
 vad:
-  provider: "webrtc_vad"  # VAD提供商：webrtc_vad 或 silero_vad
+  provider: "webrtc_vad"  # VAD提供商：webrtc_vad、silero_vad 或 ten_vad
   # WebRTC VAD配置
   webrtc_vad:
     pool_min_size: 5        # 连接池最小大小
@@ -104,6 +104,12 @@ vad:
     channels: 1                       # 声道数
     pool_size: 10                     # 连接池大小
     acquire_timeout_ms: 3000          # 获取连接超时时间（毫秒）
+  # TEN-VAD配置
+  ten_vad:
+    hop_size: 512                     # 帧移大小
+    threshold: 0.3                    # VAD检测阈值
+    pool_size: 10                     # 资源池大小
+    acquire_timeout_ms: 3000          # 获取超时时间（毫秒）
 
 # 自动语音识别（ASR）配置
 asr:
