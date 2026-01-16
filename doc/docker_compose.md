@@ -47,6 +47,11 @@
 - 支持通过卷挂载导入自定义配置文件
 - 配置文件路径：`../../config:/workspace/config`
 
+**ten_vad 支持：**
+- Docker 镜像已自动包含 ten_vad 库文件（位于 `/workspace/lib/ten-vad/`）
+- 运行时库路径已自动配置（`LD_LIBRARY_PATH`）
+- 如果使用 ten_vad 作为 VAD 提供商，无需额外配置
+
 ### 3. 后端管理服务 (xiaozhi-backend)
 
 **配置信息：**
@@ -305,6 +310,17 @@ xiaozhi-esp32-server-golang/manager/backend/config/
 日志文件通过卷挂载方式映射到容器内：
 
 - 主程序日志：`../../logs:/workspace/logs`
+
+### 4. ten_vad 库文件
+
+**说明：**
+- ten_vad 库文件已包含在 Docker 镜像中，位于 `/workspace/lib/ten-vad/`
+- 运行时库路径已通过环境变量 `LD_LIBRARY_PATH` 自动配置
+- 如果使用 ten_vad 作为 VAD 提供商，无需额外挂载或配置
+
+**本地编译注意事项：**
+- 如果需要在本地编译时使用 ten_vad，请确保 `lib/ten-vad` 目录存在
+- 编译时需要设置 CGO 环境变量（详见 README.md）
 
 ## 健康检查
 

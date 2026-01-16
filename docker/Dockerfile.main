@@ -38,10 +38,16 @@ ENV CGO_ENABLED=1
 
 # 创建工作目录并复制源代码
 WORKDIR /app
+# 先复制 lib 目录（包含 ten-vad 的头文件和库文件，cgo 编译时需要）
+COPY lib ./lib
 COPY . .
 
 # 下载Go模块
 RUN go mod tidy
+
+# 设置 CGO 链接库路径（用于 ten-vad）
+ENV CGO_LDFLAGS="-L${ONNXRUNTIME_DIR}/lib -lonnxruntime -L/app/lib/ten-vad/lib/Linux/x64"
+ENV CGO_CFLAGS="-I${ONNXRUNTIME_DIR}/include/onnxruntime -I/app/lib/ten-vad/include"
 
 # 构建主程序
 RUN go build -o /app/xiaozhi_server ./cmd/server/
@@ -56,6 +62,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libopus0 \
     libopusfile0 \
+    libc++1 \
+    libc++abi1 \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
@@ -94,9 +102,14 @@ WORKDIR /workspace
 
 # 从构建阶段复制编译后的二进制文件
 COPY --from=builder /app/xiaozhi_server /workspace/bin/xiaozhi_server
+# 复制 lib 目录（包含 ten-vad 运行时库）
+COPY --from=builder /app/lib /workspace/lib
 
 # 创建必要的目录
 RUN mkdir -p /workspace/logs /workspace/config
+
+# 设置运行时库路径（用于 ten-vad）
+ENV LD_LIBRARY_PATH=/workspace/lib:/workspace/lib/ten-vad/lib/Linux/x64
 
 # 暴露端口: http/websocket:8989, udp:8990, mqtt: 1883,2883,8883
 EXPOSE 8989 8990 1883 2883 8883

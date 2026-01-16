@@ -10,7 +10,7 @@ FROM ubuntu:22.04
 # 设置非交互式安装环境变量
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update && apt-get install -y --no-install-recommends libopus0 libopusfile-dev && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends libopus0 libopusfile-dev libc++1 libc++abi1 && rm -rf /var/lib/apt/lists/*
 
 COPY docker/lib/onnxruntime-linux-x64-1.21.0.tgz /tmp/
 RUN cd /tmp && \
@@ -29,8 +29,13 @@ WORKDIR /workspace
 
 # 仅从构建阶段复制编译后的二进制文件（不携带源码和编译依赖）
 COPY --from=builder /app/xiaozhi_server /workspace/bin/xiaozhi_server
+# 从构建阶段复制 lib 目录（包含 ten-vad 运行时库）
+COPY --from=builder /app/lib /workspace/lib
 
-RUN mkdir -p /workspace/logs /workspace/config 
+RUN mkdir -p /workspace/logs /workspace/config
+
+# 设置运行时库路径（用于 ten-vad）
+ENV LD_LIBRARY_PATH=/workspace/lib:/workspace/lib/ten-vad/lib/Linux/x64 
 
 # 暴露端口, http/websocket:8989, udp:8990  mqtt: 1883,2883,8883, 
 EXPOSE 8989 8990 1883 2883 8883

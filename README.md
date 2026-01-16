@@ -55,11 +55,19 @@ xiaozhi-esp32-server-golang 是一款高性能、全流式的 AI 后端服务，
         sudo cp -r onnxruntime-linux-x64-1.21.0/lib/* /usr/local/lib/
         sudo ldconfig
         ```
+      - 安装 ten_vad 依赖：
+        ```bash
+        # 复制 ten_vad 动态库到系统库目录（Linux）
+        sudo cp lib/ten-vad/lib/Linux/x64/libten_vad.so /usr/lib/
+        # 安装 C++ 运行时依赖（如未安装）
+        sudo apt install libc++1
+        ```
       - 设置环境变量（可写入 `~/.bashrc` 或 `~/.zshrc`）：
         ```bash
         export ONNXRUNTIME_DIR=/usr/local
-        export CGO_CFLAGS="-I${ONNXRUNTIME_DIR}/include/onnxruntime"
-        export CGO_LDFLAGS="-L${ONNXRUNTIME_DIR}/lib -lonnxruntime"
+        export CGO_CFLAGS="-I${ONNXRUNTIME_DIR}/include/onnxruntime -I$(pwd)/lib/ten-vad/include"
+        export CGO_LDFLAGS="-L${ONNXRUNTIME_DIR}/lib -lonnxruntime -L$(pwd)/lib/ten-vad/lib/Linux/x64"
+        export LD_LIBRARY_PATH=/usr/lib:$(pwd)/lib/ten-vad/lib/Linux/x64:$LD_LIBRARY_PATH
         ```
 
    2. **部署 FunASR 服务**
@@ -94,6 +102,7 @@ xiaozhi-esp32-server-golang 是一款高性能、全流式的 AI 后端服务，
 
    > ⚠️ 推荐在 Ubuntu 22.04 环境下操作，确保依赖一致。
    > 若遇到 ONNX Runtime 相关的 CGO 编译问题，请检查环境变量和依赖路径。
+   > 如果使用 ten_vad，需要确保 lib/ten-vad 目录存在且包含相应的库文件。
    > 日志和配置目录建议与 Docker 保持一致（`logs/`、`config/`）。
 
 ---
@@ -102,7 +111,7 @@ xiaozhi-esp32-server-golang 是一款高性能、全流式的 AI 后端服务，
 
 | 模块      | 功能简介                       | 技术栈/说明                |
 |-----------|-------------------------------|----------------------------|
-| VAD       | 声音活动检测（Silero VAD）    | Silero VAD, Webrtc vad                    |
+| VAD       | 声音活动检测（Silero VAD / ten_vad）    | Silero VAD, Webrtc vad, ten_vad                    |
 | ASR       | 语音识别（FunASR对接）        | FunASR, Doubao Asr       |
 | LLM       | 大语言模型（OpenAI兼容接口）  | Eino框架兼容的 LLM, openai, ollama       |
 | TTS       | 语音合成（多引擎支持）        | Doubao, EdgeTTS, CosyVoice |

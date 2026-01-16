@@ -64,6 +64,10 @@ docker run -itd --name xiaozhi_server -v $(pwd)/config:/workspace/config -p 8989
 docker run -itd --name xiaozhi_server -v $(pwd)/config:/workspace/config -p 8989:8989 docker.jsdelivr.fyi/hackers365/xiaozhi_server:latest
 ```
 
+**ten_vad 支持说明：**
+- Docker 镜像已自动包含 ten_vad 库文件，无需额外挂载
+- 如果使用 ten_vad 作为 VAD 提供商，在配置文件中设置 `vad.provider: "ten_vad"` 即可
+
 现在应该可以连上 
 >ws://机器ip:8989/xiaozhi/v1/ 
 
@@ -78,3 +82,8 @@ docker run -itd --name xiaozhi_server_golang -v $(pwd):/workspace/ -p 8989:8989 
 
 go build -o xiaozhi_server cmd/server/*.go
 ```
+
+**开发环境 ten_vad 说明：**
+- 开发环境镜像已包含 ten_vad 编译和运行时依赖
+- 如果需要在开发环境中使用 ten_vad，确保项目根目录的 `lib/ten-vad` 目录存在
+- 编译时会自动使用 ten_vad 的头文件和库文件
