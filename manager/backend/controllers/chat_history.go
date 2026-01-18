@@ -31,8 +31,10 @@ type SaveMessageRequest struct {
 	SessionID     string                 `json:"session_id,omitempty"`
 	Role          string                 `json:"role" binding:"required,oneof=user assistant system tool"`
 	Content       string                 `json:"content" binding:"required"`
-	AudioData     string                 `json:"audio_data,omitempty"`   // base64编码
-	AudioFormat   string                 `json:"audio_format,omitempty"` // 音频格式（客户端传入，后端固定使用wav）
+	ToolCallID    string                 `json:"tool_call_id,omitempty"`    // 工具调用ID（Tool角色使用）
+	ToolCallsJSON *string                `json:"tool_calls_json,omitempty"` // 工具调用列表JSON（Assistant角色使用），nil 表示 NULL
+	AudioData     string                 `json:"audio_data,omitempty"`      // base64编码
+	AudioFormat   string                 `json:"audio_format,omitempty"`    // 音频格式（客户端传入，后端固定使用wav）
 	AudioDuration int                    `json:"audio_duration,omitempty"`
 	AudioSize     int                    `json:"audio_size,omitempty"`
 	Metadata      map[string]interface{} `json:"metadata,omitempty"`
@@ -71,14 +73,16 @@ func (c *ChatHistoryController) SaveMessage(ctx *gin.Context) {
 	}
 
 	message := &models.ChatMessage{
-		MessageID: req.MessageID,
-		DeviceID:  req.DeviceID,
-		AgentID:   agentID,
-		UserID:    device.UserID,
-		SessionID: req.SessionID,
-		Role:      req.Role,
-		Content:   req.Content,
-		Metadata:  req.Metadata,
+		MessageID:     req.MessageID,
+		DeviceID:      req.DeviceID,
+		AgentID:       agentID,
+		UserID:        device.UserID,
+		SessionID:     req.SessionID,
+		Role:          req.Role,
+		Content:       req.Content,
+		ToolCallID:    req.ToolCallID,
+		ToolCallsJSON: req.ToolCallsJSON,
+		Metadata:      req.Metadata,
 	}
 
 	// 检查消息是否已存在（避免重复创建）
@@ -505,10 +509,15 @@ func (c *ChatHistoryController) GetMessagesForInit(ctx *gin.Context) {
 			"content":    msg.Content,
 			"created_at": msg.CreatedAt.Format(time.RFC3339),
 		}
-		// Tool 角色需要包含 ToolCallID（从 Metadata 中读取）
-		if msg.Role == "tool" && msg.Metadata != nil {
-			if toolCallID, ok := msg.Metadata["tool_call_id"].(string); ok && toolCallID != "" {
-				item["tool_call_id"] = toolCallID
+		// Tool 角色：从独立字段读取 ToolCallID
+		if msg.Role == "tool" && msg.ToolCallID != "" {
+			item["tool_call_id"] = msg.ToolCallID
+		}
+		// Assistant 角色：如果有 ToolCalls，反序列化并返回
+		if msg.Role == "assistant" && msg.ToolCallsJSON != nil && *msg.ToolCallsJSON != "" {
+			var toolCalls []interface{}
+			if err := json.Unmarshal([]byte(*msg.ToolCallsJSON), &toolCalls); err == nil {
+				item["tool_calls"] = toolCalls
 			}
 		}
 		messageItems = append(messageItems, item)

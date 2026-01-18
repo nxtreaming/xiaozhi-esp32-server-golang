@@ -375,7 +375,7 @@ func (l *LLMManager) handleLLMResponse(ctx context.Context, userMessage *schema.
 							if userMessage.Role == schema.User {
 								// 检查用户消息是否已经保存过（ASR 处理时已经保存）
 								// 通过检查最后一条消息是否是用户消息且内容匹配来判断
-								messages := l.clientState.GetMessages(1)
+								/*messages := l.clientState.GetMessages(1)
 								shouldSave := true
 								if len(messages) > 0 {
 									lastMsg := messages[len(messages)-1]
@@ -389,7 +389,7 @@ func (l *LLMManager) handleLLMResponse(ctx context.Context, userMessage *schema.
 									if err := l.AddLlmMessage(ctx, userMessage); err != nil {
 										log.Errorf("保存用户消息失败: %v", err)
 									}
-								}
+								}*/
 							}
 						}
 						strFullText := fullText.String()
@@ -454,7 +454,7 @@ func (l *LLMManager) handleToolCallResponse(ctx context.Context, userMessage *sc
 
 	var messageList []*schema.Message
 
-	messageList = append(messageList, userMessage)
+	//messageList = append(messageList, userMessage)
 	// 只有当respMsg有内容（Content不为空或ToolCalls不为空）时才添加到messageList
 	// 避免保存空的assistant消息导致后续LLM调用出现400错误
 	if respMsg != nil && (respMsg.Content != "" || len(respMsg.ToolCalls) > 0) {

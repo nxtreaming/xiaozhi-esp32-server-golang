@@ -283,6 +283,9 @@ func (t *TTSManager) SendTTSAudio(ctx context.Context, audioChan chan []byte, is
 					log.Debugf("SendTTSAudio 等待客户端播放剩余缓冲: %v (totalFrames=%d, frameDuration=%v)", waitDuration, totalFrames, frameDuration)
 					time.Sleep(waitDuration)
 				}
+				//等待客户端播放完成
+				time.Sleep(200 * time.Millisecond)
+
 				log.Debugf("SendTTSAudio audioChan closed, exit, 总共发送 %d 帧", totalFrames)
 				return nil
 			}

@@ -126,7 +126,6 @@ func (a *Asr) ClearHistoryAudio() {
 type AsrAudioBuffer struct {
 	PcmData          []float32
 	AudioBufferMutex sync.RWMutex
-	PcmFrameSize     int
 }
 
 func (a *AsrAudioBuffer) AddAsrAudioData(pcmFrameData []float32) error {
@@ -142,10 +141,14 @@ func (a *AsrAudioBuffer) GetAsrDataSize() int {
 	return len(a.PcmData)
 }
 
-func (a *AsrAudioBuffer) GetFrameCount() int {
+// GetFrameCount 获取帧数（需要传入帧大小用于计算）
+func (a *AsrAudioBuffer) GetFrameCount(frameSize int) int {
 	a.AudioBufferMutex.RLock()
 	defer a.AudioBufferMutex.RUnlock()
-	return len(a.PcmData) / a.PcmFrameSize
+	if frameSize == 0 {
+		return 0
+	}
+	return len(a.PcmData) / frameSize
 }
 
 func (a *AsrAudioBuffer) GetAndClearAllData() []float32 {
@@ -157,12 +160,12 @@ func (a *AsrAudioBuffer) GetAndClearAllData() []float32 {
 	return pcmData
 }
 
-// 滑动窗口进行取数据
-func (a *AsrAudioBuffer) GetAsrData(frameCount int) []float32 {
+// GetAsrData 滑动窗口进行取数据（需要传入帧大小用于计算）
+func (a *AsrAudioBuffer) GetAsrData(frameCount int, frameSize int) []float32 {
 	a.AudioBufferMutex.Lock()
 	defer a.AudioBufferMutex.Unlock()
 	pcmDataLen := len(a.PcmData)
-	retSize := frameCount * a.PcmFrameSize
+	retSize := frameCount * frameSize
 	if pcmDataLen < retSize {
 		retSize = pcmDataLen
 	}
@@ -171,10 +174,15 @@ func (a *AsrAudioBuffer) GetAsrData(frameCount int) []float32 {
 	return pcmData
 }
 
-func (a *AsrAudioBuffer) RemoveAsrAudioData(frameCount int) {
+// RemoveAsrAudioData 移除指定帧数的音频数据（需要传入帧大小用于计算）
+func (a *AsrAudioBuffer) RemoveAsrAudioData(frameCount int, frameSize int) {
 	a.AudioBufferMutex.Lock()
 	defer a.AudioBufferMutex.Unlock()
-	a.PcmData = a.PcmData[frameCount*a.PcmFrameSize:]
+	removeSize := frameCount * frameSize
+	if removeSize > len(a.PcmData) {
+		removeSize = len(a.PcmData)
+	}
+	a.PcmData = a.PcmData[removeSize:]
 }
 
 func (a *AsrAudioBuffer) ClearAsrAudioData() {

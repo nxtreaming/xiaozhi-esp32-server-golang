@@ -56,4 +56,59 @@ export default {
 body {
   height: 100vh;
 }
+
+/* 移动端样式优化 */
+@media (max-width: 767px) {
+  /* 移动端字体大小优化 */
+  body {
+    font-size: 14px;
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+  
+  /* 移动端滚动优化 */
+  * {
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  /* 移动端点击延迟优化 */
+  a, button, input, textarea {
+    touch-action: manipulation;
+  }
+  
+  /* 隐藏桌面端元素 */
+  .desktop-only {
+    display: none !important;
+  }
+}
+
+/* 桌面端样式 */
+@media (min-width: 768px) {
+  /* 隐藏移动端元素 */
+  .mobile-only {
+    display: none !important;
+  }
+}
+
+/* 全局动画 */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+/* 移动端安全区域适配 */
+@supports (padding: max(0px)) {
+  .mobile-safe-top {
+    padding-top: max(20px, env(safe-area-inset-top));
+  }
+  
+  .mobile-safe-bottom {
+    padding-bottom: max(20px, env(safe-area-inset-bottom));
+  }
+}
 </style>

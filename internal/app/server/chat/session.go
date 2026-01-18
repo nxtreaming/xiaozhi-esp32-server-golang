@@ -330,13 +330,6 @@ func (c *ChatSession) InitAsrLlmTts() error {
 	//初始化asr结构
 	c.clientState.InitAsr()
 
-	// 只设置必要的配置
-	c.clientState.SetAsrPcmFrameSize(
-		c.clientState.InputAudioFormat.SampleRate,
-		c.clientState.InputAudioFormat.Channels,
-		c.clientState.InputAudioFormat.FrameDuration,
-	)
-
 	// 初始化memory（memory不在资源池中）
 	memoryConfig := c.clientState.DeviceConfig.Memory
 	memoryProvider, err := memory.GetProvider(memory.MemoryType(memoryConfig.Provider), memoryConfig.Config)
@@ -524,7 +517,6 @@ func (s *ChatSession) HandleCommonHelloMessage(msg *ClientMessage) error {
 	clientState := s.clientState
 
 	clientState.InputAudioFormat = *msg.AudioParams
-	clientState.SetAsrPcmFrameSize(clientState.InputAudioFormat.SampleRate, clientState.InputAudioFormat.Channels, clientState.InputAudioFormat.FrameDuration)
 
 	s.asrManager.ProcessVadAudio(clientState.Ctx, s.Close)
 
@@ -751,7 +743,6 @@ func (s *ChatSession) HandleListenStart(msg *ClientMessage) error {
 	//if s.clientState.ListenMode == "manual" {
 	s.StopSpeaking(false)
 	//}
-	s.clientState.SetStatus(ClientStatusListening)
 
 	return s.OnListenStart()
 }
@@ -779,6 +770,8 @@ func (s *ChatSession) OnListenStart() error {
 	}
 
 	s.clientState.Destroy()
+
+	s.clientState.SetStatus(ClientStatusListening)
 
 	ctx := s.clientState.SessionCtx.Get(s.clientState.Ctx)
 

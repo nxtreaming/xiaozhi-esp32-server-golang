@@ -19,6 +19,9 @@ func (state *ClientState) SetStartAsrTs() {
 }
 
 func (state *ClientState) GetAsrDuration() int64 {
+	if state.Statistic.AsrStartTs == 0 {
+		return 0
+	}
 	return time.Now().UnixMilli() - state.Statistic.AsrStartTs
 }
 

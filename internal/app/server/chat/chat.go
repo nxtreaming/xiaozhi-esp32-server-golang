@@ -110,7 +110,6 @@ func GenClientState(pctx context.Context, deviceID string) (*ClientState, error)
 		AsrAudioBuffer: &AsrAudioBuffer{
 			PcmData:          make([]float32, 0),
 			AudioBufferMutex: sync.RWMutex{},
-			PcmFrameSize:     0,
 		},
 		VoiceStatus: VoiceStatus{
 			HaveVoice:            false,

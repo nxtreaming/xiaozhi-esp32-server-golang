@@ -53,17 +53,18 @@ func (a *ASRManager) ProcessVadAudio(ctx context.Context, onClose func()) {
 	go func() {
 		hasTriggeredCancel := true // 标志位，记录是否已触发过取消操作（当 voiceDuration > 120 时）
 		audioFormat := state.InputAudioFormat
-		audioProcesser, err := audio.GetAudioProcesser(audioFormat.SampleRate, audioFormat.Channels, audioFormat.FrameDuration)
+		// 使用一个足够大的缓冲区用于解码（假设最大帧时长为120ms）
+		maxFrameSize := audioFormat.SampleRate * audioFormat.Channels * 120 / 1000
+		audioProcesser, err := audio.GetAudioProcesser(audioFormat.SampleRate, audioFormat.Channels, 20) // 传入一个默认值用于创建解码器
 		if err != nil {
 			log.Errorf("获取解码器失败: %v", err)
 			return
 		}
-		frameSize := state.AsrAudioBuffer.PcmFrameSize
 
-		vadNeedGetCount := 1
-		if state.DeviceConfig.Vad.Provider == "silero_vad" {
-			vadNeedGetCount = 60 / audioFormat.FrameDuration
-		}
+		// 从第一帧实际数据中获取帧大小和帧时长
+		var frameSize int
+		var frameDurationMs int
+		var vadNeedGetCount int // VAD需要的帧数，会在第一帧后计算
 
 		// 在循环外获取VAD资源（高频使用场景，避免频繁获取/归还）
 		var vadWrapper *pool.ResourceWrapper[inter.VAD]
@@ -95,7 +96,8 @@ func (a *ASRManager) ProcessVadAudio(ctx context.Context, onClose func()) {
 		}
 
 		for {
-			pcmFrame := make([]float32, frameSize)
+			// 使用最大帧大小作为缓冲区，解码后会得到实际帧大小
+			pcmFrame := make([]float32, maxFrameSize)
 
 			select {
 			case opusFrame, ok := <-state.OpusAudioBuffer:
@@ -127,15 +129,53 @@ func (a *ASRManager) ProcessVadAudio(ctx context.Context, onClose func()) {
 					continue
 				}
 
+				// 从实际解码后的数据动态计算帧大小和帧时长
+				if frameSize == 0 {
+					// 第一帧：从实际解码的数据计算帧信息
+					frameSize = n
+					samplesPerChannel := n / audioFormat.Channels
+					frameDurationMs = samplesPerChannel * 1000 / audioFormat.SampleRate
+					audioFormat.FrameDuration = frameDurationMs
+
+					// 计算 VAD 需要的帧数
+					vadNeedGetCount = 1
+					if state.DeviceConfig.Vad.Provider == "silero_vad" {
+						// silero_vad 需要至少 60ms 的音频数据
+						vadNeedGetCount = 60 / frameDurationMs
+						if vadNeedGetCount < 1 {
+							vadNeedGetCount = 1
+						}
+					}
+					log.Debugf("从实际音频数据计算帧信息: frameSize=%d, frameDurationMs=%d, vadNeedGetCount=%d", frameSize, frameDurationMs, vadNeedGetCount)
+				}
+
 				var vadPcmData []float32
 				pcmData := pcmFrame[:n]
+
+				// 检查帧大小是否一致（正常情况下应该一致，但不一致时使用实际值）
+				if n != frameSize {
+					log.Debugf("帧大小不一致: 期望=%d, 实际=%d，使用实际值", frameSize, n)
+					// 重新计算这一帧的时长
+					samplesPerChannel := n / audioFormat.Channels
+					currentFrameDurationMs := samplesPerChannel * 1000 / audioFormat.SampleRate
+					frameSize = n
+					frameDurationMs = currentFrameDurationMs
+					audioFormat.FrameDuration = frameDurationMs
+				}
+
 				if !skipVad && vadProvider != nil {
 					//decode opus to pcm
 					state.AsrAudioBuffer.AddAsrAudioData(pcmData)
 
-					if state.AsrAudioBuffer.GetAsrDataSize() >= vadNeedGetCount*state.AsrAudioBuffer.PcmFrameSize {
+					// 计算 VAD 需要的最小数据量（60ms for silero_vad）
+					vadNeedMinSize := frameSize
+					if state.DeviceConfig.Vad.Provider == "silero_vad" {
+						vadNeedMinSize = vadNeedGetCount * frameSize
+					}
+
+					if state.AsrAudioBuffer.GetAsrDataSize() >= vadNeedMinSize {
 						//如果要进行vad, 至少要取60ms的音频数据
-						vadPcmData = state.AsrAudioBuffer.GetAsrData(vadNeedGetCount)
+						vadPcmData = state.AsrAudioBuffer.GetAsrData(vadNeedGetCount, frameSize)
 
 						//如果已经检测到语音, 则不进行vad检测, 直接将pcmData传给asr
 						// 使用循环外获取的VAD资源进行检测
@@ -157,13 +197,15 @@ func (a *ASRManager) ProcessVadAudio(ctx context.Context, onClose func()) {
 							//首次检测到语音时，最多只保留200ms的前静音数据
 							allData := state.AsrAudioBuffer.GetAndClearAllData()
 							pcmData = allData
+							// 设置ASR开始时间，用于统计识别耗时
+							state.SetStartAsrTs()
 						}
 					}
 					//log.Debugf("isVad, pcmData len: %d, vadPcmData len: %d, haveVoice: %v", len(pcmData), len(vadPcmData), haveVoice)
 				}
 
 				if !haveVoice || state.Asr.AutoEnd {
-					state.Vad.AddIdleDuration(int64(audioFormat.FrameDuration))
+					state.Vad.AddIdleDuration(int64(frameDurationMs))
 					idleDuration := state.Vad.GetIdleDuration()
 					log.Infof("空闲时间: %dms", idleDuration)
 					if idleDuration > state.GetMaxIdleDuration() {
@@ -182,7 +224,7 @@ func (a *ASRManager) ProcessVadAudio(ctx context.Context, onClose func()) {
 						state.Vad.ResetIdleDuration()
 					}
 					// 累积检测到声音的时长（同时更新一次过程中的时长）
-					state.Vad.AddVoiceDuration(int64(audioFormat.FrameDuration))
+					state.Vad.AddVoiceDuration(int64(frameDurationMs))
 
 					continuousVoiceDuration := state.Vad.GetVoiceContinuousDuration()
 					if state.IsRealTime() && viper.GetInt("chat.realtime_mode") == 1 && continuousVoiceDuration > 360 {
@@ -202,8 +244,8 @@ func (a *ASRManager) ProcessVadAudio(ctx context.Context, onClose func()) {
 					if !clientHaveVoice {
 						//保留近10帧
 						/*
-							if state.AsrAudioBuffer.GetFrameCount() > vadNeedGetCount*3 {
-								state.AsrAudioBuffer.RemoveAsrAudioData(1)
+							if state.AsrAudioBuffer.GetFrameCount(frameSize) > vadNeedGetCount*3 {
+								state.AsrAudioBuffer.RemoveAsrAudioData(1, frameSize)
 							}*/
 						continue
 					}
@@ -338,6 +380,8 @@ func (a *ASRManager) RestartAsrRecognition(ctx context.Context) error {
 	}
 
 	state.AsrResultChannel = asrResultChannel
+	// 设置ASR开始时间，用于统计识别耗时
+	state.SetStartAsrTs()
 	log.Debugf("重启ASR识别成功")
 	return nil
 }
@@ -367,6 +411,10 @@ func (a *ASRManager) StartAsrRecognitionLoop(
 		var startIdleTime, maxIdleTime int64
 		startIdleTime = time.Now().Unix()
 		maxIdleTime = 60
+
+		// 状态不允许重启时的等待计数（避免无限循环）
+		var invalidStatusWaitCount int64
+		maxInvalidStatusWaitCount := int64(10) // 最多等待10次（约1秒）
 
 		for {
 			select {
@@ -481,7 +529,17 @@ func (a *ASRManager) StartAsrRecognitionLoop(
 				}
 
 				log.Debugf("ready Restart Asr, state.Status: %s", state.Status)
-				if state.Status == ClientStatusListening || state.Status == ClientStatusListenStop {
+				// realtime 模式下，即使状态是 LLMStart 或 TTSStart，也应该继续监听（允许重启ASR）
+				// 非 realtime 模式下，只有 Listening 或 ListenStop 状态才允许重启ASR
+				isAllowedToRestart := state.Status == ClientStatusListening || state.Status == ClientStatusListenStop
+				if state.IsRealTime() {
+					// realtime 模式下，除了 Init 状态外，都允许重启（因为需要持续监听）
+					isAllowedToRestart = state.Status != ClientStatusInit
+				}
+
+				if isAllowedToRestart {
+					// 状态允许重启，重置等待计数
+					invalidStatusWaitCount = 0
 					// text 为空，检查是否需要重新启动ASR
 					diffTs := time.Now().Unix() - startIdleTime
 					if startIdleTime > 0 && diffTs <= maxIdleTime {
@@ -501,6 +559,18 @@ func (a *ASRManager) StartAsrRecognitionLoop(
 						}
 						return
 					}
+				} else {
+					// 状态不允许重启的情况，短暂等待后继续循环，给状态恢复的机会
+					invalidStatusWaitCount++
+					if invalidStatusWaitCount >= maxInvalidStatusWaitCount {
+						// 等待超时，退出循环
+						log.Debugf("状态为 %s，realtime: %v，等待%d次后仍无变化，退出ASR识别循环", state.Status, state.IsRealTime(), maxInvalidStatusWaitCount)
+						return
+					}
+					// 短暂等待后继续循环，等待状态恢复
+					log.Debugf("状态为 %s，realtime: %v，不允许重启，等待状态恢复 (等待次数: %d/%d)", state.Status, state.IsRealTime(), invalidStatusWaitCount, maxInvalidStatusWaitCount)
+					time.Sleep(200 * time.Millisecond) // 等待100ms
+					continue
 				}
 			}
 		}

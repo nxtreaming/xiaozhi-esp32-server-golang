@@ -1,5 +1,13 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { isMobile } from '../utils/device'
+
+// 根据设备类型动态加载组件
+const getLoginComponent = () => {
+  return isMobile()
+    ? import('../views/mobile/MobileLogin.vue')
+    : import('../views/Login.vue')
+}
 
 const routes = [
   {
@@ -25,7 +33,7 @@ const routes = [
   {
     path: '/login',
     name: 'Login',
-    component: () => import('../views/Login.vue')
+    component: getLoginComponent
   },
   {
     path: '/',

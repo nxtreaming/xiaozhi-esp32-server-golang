@@ -119,6 +119,10 @@ type ChatMessage struct {
 	Role    string `json:"role" gorm:"type:varchar(20);index;not null;comment:user|assistant|system|tool"`
 	Content string `json:"content" gorm:"type:text;not null"`
 
+	// 工具调用信息
+	ToolCallID    string  `json:"tool_call_id,omitempty" gorm:"type:varchar(64);index;comment:工具调用ID（Tool角色使用）"`
+	ToolCallsJSON *string `json:"tool_calls_json,omitempty" gorm:"type:json;column:tool_calls;comment:工具调用列表JSON（Assistant角色使用）"`
+
 	// 音频文件信息 (文件系统存储，两级hash打散)
 	AudioPath     string `json:"audio_path,omitempty" gorm:"type:varchar(512);comment:音频文件相对路径（两级hash打散）"`
 	AudioDuration *int   `json:"audio_duration,omitempty" gorm:"comment:毫秒"`

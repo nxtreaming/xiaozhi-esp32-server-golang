@@ -3,6 +3,9 @@ package server
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
+	"hash/fnv"
+	"sync"
 	"time"
 
 	"xiaozhi-esp32-server-golang/internal/data/history"
@@ -11,27 +14,105 @@ import (
 	log "xiaozhi-esp32-server-golang/logger"
 
 	"github.com/cloudwego/eino/schema"
-	"github.com/panjf2000/ants/v2"
+)
+
+const (
+	// workerNum 固定worker数量，必须是2的幂次以便hash分布
+	workerNum = 16
 )
 
 // HistoryWorker 聊天历史记录处理器
+// 使用固定数量的goroutine池，按SessionID的hash值路由，保证同一会话的消息顺序处理
 type HistoryWorker struct {
-	client *history.HistoryClient
-	pool   *ants.Pool
+	client  *history.HistoryClient
+	workers []chan *eventbus.AddMessageEvent // 每个worker的channel
+	ctx     context.Context
+	cancel  context.CancelFunc
+	wg      sync.WaitGroup
 }
 
 // NewHistoryWorker 创建历史记录处理器
 func NewHistoryWorker(cfg history.HistoryClientConfig) *HistoryWorker {
 	client := history.NewHistoryClient(cfg)
-	pool, _ := ants.NewPool(50)
+	ctx, cancel := context.WithCancel(context.Background())
 
 	worker := &HistoryWorker{
-		client: client,
-		pool:   pool,
+		client:  client,
+		workers: make([]chan *eventbus.AddMessageEvent, workerNum),
+		ctx:     ctx,
+		cancel:  cancel,
+	}
+
+	// 初始化每个worker的channel并启动goroutine
+	for i := 0; i < workerNum; i++ {
+		worker.workers[i] = make(chan *eventbus.AddMessageEvent, 100) // 缓冲100个消息
+		worker.wg.Add(1)
+		go worker.workerLoop(i)
 	}
 
 	worker.subscribeEvents()
+	log.Infof("HistoryWorker初始化完成，启动 %d 个worker goroutine", workerNum)
 	return worker
+}
+
+// workerLoop 每个worker的处理循环（保证顺序处理）
+func (w *HistoryWorker) workerLoop(index int) {
+	defer w.wg.Done()
+	defer log.Infof("HistoryWorker worker %d 退出", index)
+
+	ch := w.workers[index]
+	for {
+		select {
+		case <-w.ctx.Done():
+			// 清理channel中的剩余消息
+			for {
+				select {
+				case event := <-ch:
+					if event != nil {
+						w.processMessage(event)
+					}
+				default:
+					return
+				}
+			}
+		case event, ok := <-ch:
+			if !ok {
+				// channel已关闭
+				return
+			}
+			if event != nil {
+				w.processMessage(event)
+			}
+		}
+	}
+}
+
+// processMessage 处理消息（在worker goroutine中顺序执行）
+func (w *HistoryWorker) processMessage(event *eventbus.AddMessageEvent) {
+	ctx, cancel := context.WithTimeout(event.ClientState.Ctx, 5*time.Second)
+	defer cancel()
+
+	// 判断是新增还是更新
+	if event.IsUpdate {
+		// 第二阶段：更新音频
+		w.updateMessageAudio(ctx, event)
+	} else {
+		// 第一阶段：保存文本消息
+		w.saveMessageText(ctx, event)
+	}
+}
+
+// hashSessionID 计算SessionID的hash值，返回worker索引
+func (w *HistoryWorker) hashSessionID(sessionID string) int {
+	if sessionID == "" {
+		return 0 // 如果SessionID为空，使用第一个worker
+	}
+
+	// 使用FNV-1a哈希函数
+	h := fnv.New32a()
+	h.Write([]byte(sessionID))
+	hash := h.Sum32()
+	return int(hash) % workerNum
 }
 
 // subscribeEvents 订阅EventBus事件
@@ -41,21 +122,34 @@ func (w *HistoryWorker) subscribeEvents() {
 	bus.Subscribe(eventbus.TopicAddMessage, w.handleAddMessage)
 }
 
-// handleAddMessage 统一处理消息添加事件
+// handleAddMessage 统一处理消息添加事件（路由到对应的worker）
 func (w *HistoryWorker) handleAddMessage(event *eventbus.AddMessageEvent) {
-	w.pool.Submit(func() {
-		ctx, cancel := context.WithTimeout(event.ClientState.Ctx, 5*time.Second)
-		defer cancel()
+	if event == nil || event.ClientState == nil {
+		return
+	}
 
-		// 判断是新增还是更新
-		if event.IsUpdate {
-			// 第二阶段：更新音频
-			w.updateMessageAudio(ctx, event)
-		} else {
-			// 第一阶段：保存文本消息
-			w.saveMessageText(ctx, event)
-		}
-	})
+	// 确定用于路由的key：优先使用SessionID，如果为空则使用DeviceID
+	key := event.ClientState.SessionID
+	if key == "" {
+		key = event.ClientState.DeviceID
+	}
+	if key == "" {
+		log.Warnf("SessionID和DeviceID都为空，无法路由消息")
+		return
+	}
+
+	// 计算hash值，路由到对应的worker
+	workerIndex := w.hashSessionID(key)
+
+	// 非阻塞发送到对应的worker channel
+	select {
+	case w.workers[workerIndex] <- event:
+		// 成功发送
+	default:
+		// channel已满，记录警告（通常不会发生，因为channel有缓冲）
+		log.Warnf("worker %d 的channel已满，丢弃消息, session_id: %s, device_id: %s",
+			workerIndex, event.ClientState.SessionID, event.ClientState.DeviceID)
+	}
 }
 
 // saveMessageText 保存文本消息（第一阶段，或一次性保存文本+音频）
@@ -121,26 +215,46 @@ func (w *HistoryWorker) saveMessageText(ctx context.Context, event *eventbus.Add
 		}
 	}
 
-	// 构建 Metadata
+	// 构建 Metadata（只保存时间戳）
 	metadata := map[string]interface{}{
 		"timestamp": event.Timestamp.Format(time.RFC3339),
 	}
-	// Tool 角色需要将 ToolCallID 存储到 Metadata 中
+
+	// 准备工具调用相关字段
+	var toolCallID string
+	var toolCallsJSON *string
+
+	// Tool 角色：保存 tool_call_id
 	if event.Msg.Role == schema.Tool && event.Msg.ToolCallID != "" {
-		metadata["tool_call_id"] = event.Msg.ToolCallID
+		toolCallID = event.Msg.ToolCallID
+	}
+
+	// Assistant 角色：保存 ToolCalls（如果有）
+	if event.Msg.Role == schema.Assistant && len(event.Msg.ToolCalls) > 0 {
+		// 序列化 ToolCalls 为 JSON 字符串
+		toolCallsBytes, err := json.Marshal(event.Msg.ToolCalls)
+		if err != nil {
+			log.Warnf("序列化 ToolCalls 失败, device_id: %s, message_id: %s, error: %v",
+				event.ClientState.DeviceID, event.MessageID, err)
+		} else {
+			jsonStr := string(toolCallsBytes)
+			toolCallsJSON = &jsonStr
+		}
 	}
 
 	req := &history.SaveMessageRequest{
-		MessageID:   event.MessageID,
-		DeviceID:    event.ClientState.DeviceID,
-		AgentID:     event.ClientState.AgentID,
-		SessionID:   event.ClientState.SessionID,
-		Role:        role,
-		Content:     event.Msg.Content,
-		AudioData:   audioBase64,
-		AudioFormat: audioFormat,
-		AudioSize:   audioSize,
-		Metadata:    metadata,
+		MessageID:     event.MessageID,
+		DeviceID:      event.ClientState.DeviceID,
+		AgentID:       event.ClientState.AgentID,
+		SessionID:     event.ClientState.SessionID,
+		Role:          role,
+		Content:       event.Msg.Content,
+		ToolCallID:    toolCallID,
+		ToolCallsJSON: toolCallsJSON,
+		AudioData:     audioBase64,
+		AudioFormat:   audioFormat,
+		AudioSize:     audioSize,
+		Metadata:      metadata,
 	}
 
 	if err := w.client.SaveMessage(ctx, req); err != nil {

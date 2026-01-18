@@ -3,6 +3,7 @@ package eventbus
 import (
 	"time"
 	. "xiaozhi-esp32-server-golang/internal/data/client"
+
 	"github.com/cloudwego/eino/schema"
 )
 
@@ -39,4 +40,3 @@ type AddMessageEvent struct {
 	// 阶段标识
 	IsUpdate bool // true=更新音频，false=新增消息
 }
-

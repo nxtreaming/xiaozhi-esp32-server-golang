@@ -55,7 +55,9 @@ type SaveMessageRequest struct {
 	SessionID     string                 `json:"session_id,omitempty"`
 	Role          MessageType            `json:"role"`
 	Content       string                 `json:"content"`
-	AudioData     string                 `json:"audio_data,omitempty"` // base64编码
+	ToolCallID    string  `json:"tool_call_id,omitempty"`    // 工具调用ID（Tool角色使用）
+	ToolCallsJSON *string `json:"tool_calls_json,omitempty"` // 工具调用列表JSON（Assistant角色使用），nil 表示 NULL
+	AudioData     string                 `json:"audio_data,omitempty"`      // base64编码
 	AudioFormat   string                 `json:"audio_format,omitempty"`
 	AudioDuration int                    `json:"audio_duration,omitempty"`
 	AudioSize     int                    `json:"audio_size,omitempty"`

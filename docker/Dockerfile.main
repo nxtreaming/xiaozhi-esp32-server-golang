@@ -8,20 +8,22 @@ ENV DEBIAN_FRONTEND=noninteractive
 ARG TARGETARCH
 
 # 安装构建依赖
-RUN apt-get update && apt-get install -y libopus-dev libopusfile-dev pkg-config wget
+RUN apt-get update && apt-get install -y libopus-dev libopusfile-dev pkg-config
 
-# 根据架构下载并安装ONNX Runtime
+# 复制 onnxruntime 库文件
+COPY docker/lib/onnxruntime-linux-*.tgz /tmp/
+
+# 根据架构安装ONNX Runtime（使用本地文件）
 RUN ONNX_ARCH=$(case ${TARGETARCH} in \
         amd64) echo "x64" ;; \
         arm64) echo "aarch64" ;; \
         *) echo "x64" ;; \
     esac) && \
     ONNX_VERSION="1.21.0" && \
-    ONNX_URL="https://github.com/microsoft/onnxruntime/releases/download/v${ONNX_VERSION}/onnxruntime-linux-${ONNX_ARCH}-${ONNX_VERSION}.tgz" && \
-    echo "Downloading ONNX Runtime for ${ONNX_ARCH} architecture from ${ONNX_URL}" && \
-    wget -O /tmp/onnxruntime.tgz "${ONNX_URL}" && \
+    ONNX_FILE="onnxruntime-linux-${ONNX_ARCH}-${ONNX_VERSION}.tgz" && \
+    echo "Installing ONNX Runtime for ${ONNX_ARCH} architecture from local file: ${ONNX_FILE}" && \
     cd /tmp && \
-    tar -xzf onnxruntime.tgz && \
+    tar -xzf ${ONNX_FILE} && \
     ONNX_DIR=$(ls -d onnxruntime-linux-*/) && \
     mkdir -p /usr/local/include/onnxruntime && \
     cp -r ${ONNX_DIR}include/* /usr/local/include/onnxruntime/ && \
@@ -70,21 +72,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # 获取构建参数
 ARG TARGETARCH
 
-# 安装wget用于下载
-RUN apt-get update && apt-get install -y --no-install-recommends wget && rm -rf /var/lib/apt/lists/*
+# 复制 onnxruntime 库文件
+COPY docker/lib/onnxruntime-linux-*.tgz /tmp/
 
-# 根据架构下载并安装ONNX Runtime运行时
+# 根据架构安装ONNX Runtime运行时（使用本地文件）
 RUN ONNX_ARCH=$(case ${TARGETARCH} in \
         amd64) echo "x64" ;; \
         arm64) echo "aarch64" ;; \
         *) echo "x64" ;; \
     esac) && \
     ONNX_VERSION="1.21.0" && \
-    ONNX_URL="https://github.com/microsoft/onnxruntime/releases/download/v${ONNX_VERSION}/onnxruntime-linux-${ONNX_ARCH}-${ONNX_VERSION}.tgz" && \
-    echo "Downloading ONNX Runtime for ${ONNX_ARCH} architecture from ${ONNX_URL}" && \
-    wget -O /tmp/onnxruntime.tgz "${ONNX_URL}" && \
+    ONNX_FILE="onnxruntime-linux-${ONNX_ARCH}-${ONNX_VERSION}.tgz" && \
+    echo "Installing ONNX Runtime for ${ONNX_ARCH} architecture from local file: ${ONNX_FILE}" && \
     cd /tmp && \
-    tar -xzf onnxruntime.tgz && \
+    tar -xzf ${ONNX_FILE} && \
     ONNX_DIR=$(ls -d onnxruntime-linux-*/) && \
     mkdir -p /usr/local/include/onnxruntime && \
     cp -r ${ONNX_DIR}include/* /usr/local/include/onnxruntime/ && \

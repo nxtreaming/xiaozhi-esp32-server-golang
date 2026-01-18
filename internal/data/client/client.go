@@ -401,10 +401,6 @@ func (c *ClientState) Destroy() {
 	c.SetTtsStart(false)
 }
 
-func (c *ClientState) SetAsrPcmFrameSize(sampleRate int, channels int, perFrameDuration int) {
-	c.AsrAudioBuffer.PcmFrameSize = sampleRate * channels * perFrameDuration / 1000
-}
-
 func (state *ClientState) OnManualStop() {
 	state.OnVoiceSilence()
 }
@@ -416,8 +412,6 @@ func (state *ClientState) OnVoiceSilence() {
 	state.Asr.Stop() //停止asr并获取结果，进行llm
 	//释放vad
 	state.Vad.Reset() //释放vad实例
-	//asr统计
-	state.SetStartAsrTs() //进行asr统计
 
 	state.SetStatus(ClientStatusListenStop)
 
