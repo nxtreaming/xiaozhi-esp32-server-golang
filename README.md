@@ -99,6 +99,7 @@ xiaozhi-esp32-server-golang 是一款高性能、全流式的 AI 后端服务，
    - [声纹识别功能说明 »](doc/speaker_identification.md)
    - [MCP 架构 »](doc/mcp.md)
    - [MCP 音频服务说明(支持分页获取资源) »](doc/mcp_resource.md)
+   - [ESP32 小智AI后端部署与使用指南 »](doc/esp32_xiaozhi_backend_guide.md)
 
    ---
 
