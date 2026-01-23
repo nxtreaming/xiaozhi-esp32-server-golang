@@ -65,8 +65,9 @@ func NewDoubaoV2ASR(config DoubaoV2Config) (*DoubaoV2ASR, error) {
 }
 
 // StreamingRecognize 实现流式识别接口
+// 注意：连接将在收到第一个音频包时延迟建立，避免因VAD延迟导致服务端超时
 func (d *DoubaoV2ASR) StreamingRecognize(ctx context.Context, audioStream <-chan []float32) (chan types.StreamingResult, error) {
-	// 建立连接
+	// 创建客户端实例（不立即建立连接）
 	d.c = client.NewAsrWsClient(d.config.WsURL, d.config.AppID, d.config.AccessToken)
 
 	// 豆包返回的识别结果
@@ -74,23 +75,20 @@ func (d *DoubaoV2ASR) StreamingRecognize(ctx context.Context, audioStream <-chan
 	//程序内部的结果通道
 	resultChan := make(chan types.StreamingResult, 10)
 
-	err := d.c.CreateConnection(ctx)
-	if err != nil {
-		log.Errorf("doubao asr failed to create connection: %v", err)
-		return nil, fmt.Errorf("create connection err: %w", err)
-	}
-	err = d.c.SendFullClientRequest()
-	if err != nil {
-		log.Errorf("doubao asr failed to send full request: %v", err)
-		return nil, fmt.Errorf("send full request err: %w", err)
-	}
-
+	// 启动音频流处理（连接将在第一个音频包到达时建立）
 	go func() {
-		err = d.c.StartAudioStream(ctx, audioStream, doubaoResultChan)
+		err := d.c.StartAudioStream(ctx, audioStream, doubaoResultChan)
+		if err != nil {
+			log.Errorf("doubao asr StartAudioStream failed: %v", err)
+			// 发送错误结果
+			resultChan <- types.StreamingResult{
+				Text:    "",
+				IsFinal: true,
+				Error:   fmt.Errorf("start audio stream err: %w", err),
+			}
+			close(doubaoResultChan)
+		}
 	}()
-
-	// 启动音频发送goroutine
-	//go d.forwardStreamAudio(ctx, audioStream, resultChan)
 
 	// 启动结果接收goroutine
 	go d.receiveStreamResults(ctx, resultChan, doubaoResultChan)
@@ -102,7 +100,9 @@ func (d *DoubaoV2ASR) StreamingRecognize(ctx context.Context, audioStream <-chan
 func (d *DoubaoV2ASR) receiveStreamResults(ctx context.Context, resultChan chan types.StreamingResult, asrResponseChan chan *response.AsrResponse) {
 	defer func() {
 		close(resultChan)
-		d.c.Close()
+		if d.c != nil {
+			d.c.Close()
+		}
 	}()
 	for {
 		select {
@@ -112,6 +112,7 @@ func (d *DoubaoV2ASR) receiveStreamResults(ctx context.Context, resultChan chan 
 		case result, ok := <-asrResponseChan:
 			if !ok {
 				log.Debugf("receiveStreamResults asrResponseChan 已关闭")
+				// 静音情况：连接未建立，asrResponseChan 被关闭，直接返回
 				return
 			}
 			if result.Code != 0 {
@@ -123,6 +124,7 @@ func (d *DoubaoV2ASR) receiveStreamResults(ctx context.Context, resultChan chan 
 				return
 			}
 			if result.IsLastPackage {
+				// 处理最终结果（包括静音情况的空结果）
 				resultChan <- types.StreamingResult{
 					Text:    result.PayloadMsg.Result.Text,
 					IsFinal: true,
