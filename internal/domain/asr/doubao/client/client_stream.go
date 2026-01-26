@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 
@@ -79,32 +80,85 @@ func (c *AsrWsClient) SendFullClientRequest() error {
 	return nil
 }
 
-// ensureConnection 确保连接已建立（延迟连接）
+// ensureConnection 确保连接已建立（延迟连接，带重试机制）
 func (c *AsrWsClient) ensureConnection(ctx context.Context) error {
 	var err error
 	c.connectOnce.Do(func() {
 		log.Debugf("延迟建立连接：收到第一个音频包，开始建立连接")
-		err = c.CreateConnection(ctx)
-		if err != nil {
-			c.connectErrMu.Lock()
-			c.connectErr = err
-			c.connectErrMu.Unlock()
-			log.Errorf("延迟建立连接失败: %v", err)
+
+		// 重试配置
+		const (
+			maxRetries = 3                      // 最大重试次数（总共尝试4次：初始1次 + 重试3次）
+			retryDelay = 500 * time.Millisecond // 重试延迟
+		)
+
+		for attempt := 1; attempt <= maxRetries+1; attempt++ {
+			// 尝试建立连接
+			err = c.CreateConnection(ctx)
+			if err != nil {
+				if attempt <= maxRetries {
+					log.Warnf("延迟建立连接失败(第%d次): %v，%v后重试", attempt, err, retryDelay)
+					select {
+					case <-ctx.Done():
+						err = fmt.Errorf("连接建立被取消: %w", ctx.Err())
+						c.connectErrMu.Lock()
+						c.connectErr = err
+						c.connectErrMu.Unlock()
+						return
+					case <-time.After(retryDelay):
+						// 固定延迟后重试
+					}
+					continue
+				} else {
+					// 最后一次重试失败
+					log.Errorf("延迟建立连接失败(第%d次，已达最大重试次数): %v", attempt, err)
+					c.connectErrMu.Lock()
+					c.connectErr = err
+					c.connectErrMu.Unlock()
+					return
+				}
+			}
+
+			// 连接建立成功，发送初始化请求
+			err = c.SendFullClientRequest()
+			if err != nil {
+				// 发送初始化请求失败，关闭连接并重试
+				log.Warnf("发送初始化请求失败(第%d次): %v", attempt, err)
+				c.Close()
+
+				if attempt <= maxRetries {
+					log.Warnf("%v后重试建立连接", retryDelay)
+					select {
+					case <-ctx.Done():
+						err = fmt.Errorf("连接建立被取消: %w", ctx.Err())
+						c.connectErrMu.Lock()
+						c.connectErr = err
+						c.connectErrMu.Unlock()
+						return
+					case <-time.After(retryDelay):
+						// 固定延迟后重试
+					}
+					continue
+				} else {
+					// 最后一次重试失败
+					log.Errorf("发送初始化请求失败(第%d次，已达最大重试次数): %v", attempt, err)
+					c.connectErrMu.Lock()
+					c.connectErr = err
+					c.connectErrMu.Unlock()
+					return
+				}
+			}
+
+			// 连接和初始化都成功
+			if attempt > 1 {
+				log.Infof("延迟建立连接成功(第%d次尝试)", attempt)
+			} else {
+				log.Debugf("延迟建立连接成功")
+			}
+			// 通知接收 goroutine 连接已建立
+			close(c.connectReady)
 			return
 		}
-		err = c.SendFullClientRequest()
-		if err != nil {
-			c.connectErrMu.Lock()
-			c.connectErr = err
-			c.connectErrMu.Unlock()
-			log.Errorf("发送初始化请求失败: %v", err)
-			// 连接已建立但初始化失败，需要关闭连接
-			c.Close()
-			return
-		}
-		log.Debugf("延迟建立连接成功")
-		// 通知接收 goroutine 连接已建立
-		close(c.connectReady)
 	})
 	return err
 }
