@@ -1,7 +1,6 @@
 package zhipu
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/base64"
@@ -18,6 +17,8 @@ import (
 	"xiaozhi-esp32-server-golang/internal/data/audio"
 	"xiaozhi-esp32-server-golang/internal/util"
 	log "xiaozhi-esp32-server-golang/logger"
+
+	sse "github.com/tmaxmax/go-sse"
 )
 
 // 全局HTTP客户端，实现连接池
@@ -357,19 +358,23 @@ func (p *ZhipuTTSProvider) TextToSpeechStream(ctx context.Context, text string, 
 	return outputChan, nil
 }
 
-// parseEventStream 解析 Event Stream 响应，解码数据并写入管道
+// parseEventStream 使用 go-sse 解析智谱的 Event Stream 响应，解码数据并写入管道
 // ctx: 上下文，用于取消操作
 // reader: 响应体读取器
 // writer: 管道写入端，用于输出解码后的二进制数据
 // text: 原始文本，用于日志记录
 func (p *ZhipuTTSProvider) parseEventStream(ctx context.Context, reader io.Reader, writer *io.PipeWriter, text string) error {
-	scanner := bufio.NewScanner(reader)
-	// 设置更大的缓冲区以处理长行（默认64KB可能不够，设置为2MB）
-	maxCapacity := 2 * 1024 * 1024  // 2MB
-	buf := make([]byte, 0, 64*1024) // 初始缓冲区64KB
-	scanner.Buffer(buf, maxCapacity)
+	// 配置 go-sse 的 ReadConfig，设置更大的 MaxEventSize 以处理长 token
+	// 智谱 TTS 返回的 base64 编码音频数据可能超过默认的 64KB 限制
+	readConfig := &sse.ReadConfig{
+		MaxEventSize: 4 * 1024 * 1024, // 4MB，足够处理大型 base64 编码的音频数据
+	}
 
-	for scanner.Scan() {
+	for ev, evErr := range sse.Read(reader, readConfig) {
+		if evErr != nil {
+			return fmt.Errorf("读取智谱 SSE 事件失败: %w", evErr)
+		}
+
 		select {
 		case <-ctx.Done():
 			log.Debugf("智谱 TTS流式合成取消, 文本: %s", text)
@@ -377,63 +382,50 @@ func (p *ZhipuTTSProvider) parseEventStream(ctx context.Context, reader io.Reade
 		default:
 		}
 
-		line := scanner.Text()
-
 		// Event Stream 格式：
 		// data: {"id":"...","choices":[{"delta":{"content":"base64_data"}}]}
 		// data: {"choices":[{"finish_reason":"stop"}]}
-		// (空行分隔)
 
-		if strings.HasPrefix(line, "data: ") {
-			// 提取 data 字段的值（JSON 字符串）
-			dataValue := strings.TrimPrefix(line, "data: ")
-
-			// 解析 JSON
-			var eventResp zhipuEventStreamResponse
-			if err := json.Unmarshal([]byte(dataValue), &eventResp); err != nil {
-				log.Warnf("解析 Event Stream JSON 失败: %v, 数据: %s", err, dataValue[:min(100, len(dataValue))])
-				continue
-			}
-
-			// 检查是否有 finish_reason，表示流结束
-			for _, choice := range eventResp.Choices {
-				if choice.FinishReason == "stop" {
-					log.Debugf("收到 finish_reason: stop，Event Stream 结束")
-					return nil
-				}
-			}
-
-			// 提取每个 choice 的 content 字段并独立处理
-			for _, choice := range eventResp.Choices {
-				if choice.Delta.Content != "" {
-					// 每个 content 独立解码并写入
-					if err := p.decodeAndWriteContent(choice.Delta.Content, writer); err != nil {
-						return fmt.Errorf("处理 content 失败: %v", err)
-					}
-				}
-			}
-		} else if strings.HasPrefix(line, "event: ") || strings.HasPrefix(line, "id: ") || strings.HasPrefix(line, ":") {
-			// 忽略其他 Event Stream 字段（event, id, 注释等）
+		dataValue := strings.TrimSpace(ev.Data)
+		if dataValue == "" {
 			continue
-		} else if line != "" {
-			// 未知格式的行，记录调试信息但继续处理
-			log.Debugf("未知的 Event Stream 行: %s", line)
 		}
-	}
 
-	if err := scanner.Err(); err != nil && err != io.EOF {
-		return fmt.Errorf("读取 Event Stream 失败: %v", err)
+		// 解析 JSON
+		var eventResp zhipuEventStreamResponse
+		if err := json.Unmarshal([]byte(dataValue), &eventResp); err != nil {
+			log.Warnf("解析智谱 Event Stream JSON 失败: %v, 数据: %s", err, previewString(dataValue, 200))
+			continue
+		}
+
+		// 检查是否有 finish_reason，表示流结束
+		for _, choice := range eventResp.Choices {
+			if choice.FinishReason == "stop" {
+				log.Debugf("收到 finish_reason: stop，Event Stream 结束")
+				return nil
+			}
+		}
+
+		// 提取每个 choice 的 content 字段并独立处理
+		for _, choice := range eventResp.Choices {
+			if choice.Delta.Content != "" {
+				// 每个 content 独立解码并写入
+				if err := p.decodeAndWriteContent(choice.Delta.Content, writer); err != nil {
+					return fmt.Errorf("处理 content 失败: %v", err)
+				}
+			}
+		}
 	}
 
 	return nil
 }
 
-// min 返回两个整数中的较小值
-func min(a, b int) int {
-	if a < b {
-		return a
+// previewString 返回字符串的前 n 个字符用于日志
+func previewString(s string, n int) string {
+	if len(s) <= n {
+		return s
 	}
-	return b
+	return s[:n]
 }
 
 // decodeAndWriteContent 解码单个 content 字段并写入管道
