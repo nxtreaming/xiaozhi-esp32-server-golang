@@ -529,8 +529,8 @@ func (p *MinimaxTTSProvider) readMessage(conn *websocket.Conn) (*minimaxResp, er
 	if err != nil {
 		return nil, err
 	}
-
-	log.Debugf("minimax 读取到WebSocket消息: type=%d, 原始内容长度=%d, 内容=%s", messageType, len(message), string(message))
+	_ = messageType
+	//log.Debugf("minimax 读取到WebSocket消息: type=%d, 原始内容长度=%d, 内容=%s", messageType, len(message), string(message))
 
 	var msg minimaxResp
 	if err := json.Unmarshal(message, &msg); err != nil {
