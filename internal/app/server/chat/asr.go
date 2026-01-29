@@ -198,8 +198,6 @@ func (a *ASRManager) ProcessVadAudio(ctx context.Context, onClose func()) {
 							//首次检测到语音时，最多只保留200ms的前静音数据
 							allData := state.AsrAudioBuffer.GetAndClearAllData()
 							pcmData = allData
-							// 设置ASR开始时间，用于统计识别耗时
-							state.SetStartAsrTs()
 						}
 					}
 					//log.Debugf("isVad, pcmData len: %d, vadPcmData len: %d, haveVoice: %v", len(pcmData), len(vadPcmData), haveVoice)

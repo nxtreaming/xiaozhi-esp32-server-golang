@@ -614,25 +614,24 @@ func (s *ChatSession) HandleNotActivated() {
 
 	log.Infof("激活码: %d, 挑战码: %s, 消息: %s, 超时时间: %d", code, challenge, message, timeoutMs)
 
-	s.serverTransport.SendTtsStart()
-	defer s.serverTransport.SendTtsStop()
+	s.ttsManager.EnqueueTtsStart(s.clientState.Ctx)
+	defer s.ttsManager.EnqueueTtsStop(s.clientState.Ctx)
 
 	sessionCtx := s.clientState.SessionCtx.Get(s.clientState.Ctx)
-	s.ttsManager.handleTts(s.clientState.AfterAsrSessionCtx.Get(sessionCtx), llm_common.LLMResponseStruct{
+	_ = s.ttsManager.handleTextResponse(s.clientState.AfterAsrSessionCtx.Get(sessionCtx), llm_common.LLMResponseStruct{
 		Text: fmt.Sprintf("请在后台添加设备，激活码: %d", code),
-	})
+	}, false)
 
 }
 
 func (s *ChatSession) HandleWelcome() {
 	greetingText := s.GetRandomGreeting()
-	s.serverTransport.SendTtsStart()
-	defer s.serverTransport.SendTtsStop()
-
 	sessionCtx := s.clientState.SessionCtx.Get(s.clientState.Ctx)
-	s.ttsManager.handleTts(s.clientState.AfterAsrSessionCtx.Get(sessionCtx), llm_common.LLMResponseStruct{
-		Text: greetingText,
-	})
+	ctx := s.clientState.AfterAsrSessionCtx.Get(sessionCtx)
+
+	s.ttsManager.EnqueueTtsStart(s.clientState.Ctx)
+	s.ttsManager.handleTts(ctx, llm_common.LLMResponseStruct{Text: greetingText}, nil, nil)
+	s.ttsManager.EnqueueTtsStop(s.clientState.Ctx)
 
 	s.clientState.IsWelcomeSpeaking = true
 }
@@ -890,7 +889,7 @@ func (s *ChatSession) DoExitChat() {
 	ctx := s.clientState.AfterAsrSessionCtx.Get(sessionCtx)
 
 	// 发送 TTS 再见语
-	s.serverTransport.SendTtsStart()
+	s.ttsManager.EnqueueTtsStart(ctx)
 
 	err := s.ttsManager.handleTextResponse(ctx, llm_common.LLMResponseStruct{
 		Text:    goodbyeText,
@@ -902,9 +901,7 @@ func (s *ChatSession) DoExitChat() {
 		log.Errorf("发送再见语失败: %v", err)
 	}
 
-	time.Sleep(200 * time.Millisecond) // ttsStopDelayDuration
-
-	s.serverTransport.SendTtsStop()
+	s.ttsManager.EnqueueTtsStop(ctx)
 	// 关闭会话
 	s.Close()
 }

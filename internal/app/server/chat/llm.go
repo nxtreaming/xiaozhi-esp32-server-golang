@@ -175,13 +175,12 @@ func (l *LLMManager) HandleLLMResponseChannelAsync(ctx context.Context, userMess
 				l.ttsManager.ClearAudioHistory()
 				log.Debugf("onStartFunc 首次调用，已清空TTS音频缓存")
 			}
-			l.serverTransport.SendTtsStart()
+			l.ttsManager.EnqueueTtsStart(ctx)
 		}
 		onEndFunc = func(err error, args ...any) {
-			//非realtime模式下, 发送TTS停止命令
+			// 非 realtime 模式下，由 runSenderLoop 统一发送 TtsStop
 			if !l.clientState.IsRealTime() {
-				time.Sleep(ttsStopDelayDuration)
-				l.serverTransport.SendTtsStop()
+				l.ttsManager.EnqueueTtsStop(ctx)
 			}
 
 			// 从 closure 中获取 fullText
@@ -268,16 +267,14 @@ func (l *LLMManager) HandleLLMResponseChannelSync(ctx context.Context, userMessa
 			l.ttsManager.ClearAudioHistory()
 			log.Debugf("HandleLLMResponseChannelSync 首次调用，已清空TTS音频缓存")
 		}
-		l.serverTransport.SendTtsStart()
+		l.ttsManager.EnqueueTtsStart(ctx)
 	}
 
 	ok, err := l.handleLLMResponse(ctx, userMessage, llmResponseChannel)
 
 	if needSendTtsCmd {
 		if !l.clientState.IsRealTime() {
-			//加个
-			time.Sleep(ttsStopDelayDuration)
-			l.serverTransport.SendTtsStop()
+			l.ttsManager.EnqueueTtsStop(ctx)
 		}
 
 		// 收集TTS音频并发送聊天历史事件

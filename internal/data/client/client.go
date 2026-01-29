@@ -419,6 +419,8 @@ func (state *ClientState) OnVoiceSilence() {
 	if state.OnVoiceSilenceSpeakerCallback != nil {
 		state.OnVoiceSilenceSpeakerCallback(state.Ctx)
 	}
+
+	state.SetStartAsrTs()
 }
 
 type Llm struct {
