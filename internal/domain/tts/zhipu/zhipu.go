@@ -309,6 +309,7 @@ func (p *ZhipuTTSProvider) TextToSpeechStream(ctx context.Context, text string, 
 		}
 
 		// 流式时只支持 pcm 和 wav 格式
+		//log.Debugf("智谱 TTS 流式 responseFormat(请求): %s", responseFormat)
 		if responseFormat == "pcm" || responseFormat == "wav" {
 			// 创建管道，用于将解码后的二进制数据传递给音频解码器
 			pipeReader, pipeWriter := io.Pipe()
@@ -409,6 +410,7 @@ func (p *ZhipuTTSProvider) parseEventStream(ctx context.Context, reader io.Reade
 		// 提取每个 choice 的 content 字段并独立处理
 		for _, choice := range eventResp.Choices {
 			if choice.Delta.Content != "" {
+				//log.Debugf("智谱 TTS 流式 return_format(返回): %s", choice.Delta.ReturnFormat)
 				// 每个 content 独立解码并写入
 				if err := p.decodeAndWriteContent(choice.Delta.Content, writer); err != nil {
 					return fmt.Errorf("处理 content 失败: %v", err)
@@ -435,13 +437,6 @@ func (p *ZhipuTTSProvider) decodeAndWriteContent(content string, writer *io.Pipe
 	if content == "" {
 		return nil
 	}
-
-	// 清理空白字符（base64 和 hex 编码不应该包含空白字符）
-	// 移除所有空白字符：空格、换行、制表符等
-	content = strings.ReplaceAll(content, " ", "")
-	content = strings.ReplaceAll(content, "\n", "")
-	content = strings.ReplaceAll(content, "\r", "")
-	content = strings.ReplaceAll(content, "\t", "")
 
 	if content == "" {
 		return nil

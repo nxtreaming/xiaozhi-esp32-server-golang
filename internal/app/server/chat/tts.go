@@ -13,9 +13,33 @@ import (
 	log "xiaozhi-esp32-server-golang/logger"
 )
 
+// 会话级全局音频队列元素类型常量
+const (
+	AudioQueueKindFrame         = 0
+	AudioQueueKindSentenceStart = 1
+	AudioQueueKindSentenceEnd   = 2
+	AudioQueueKindTtsStart      = 3
+	AudioQueueKindTtsStop       = 4
+)
+
+// AudioQueueElem 会话级音频队列元素，兼容 []byte 与 sentence_start/sentence_end、tts_start/tts_stop
+type AudioQueueElem struct {
+	Kind    int    // AudioQueueKindFrame / SentenceStart / SentenceEnd / TtsStart / TtsStop
+	Data    []byte // Kind==Frame 时使用，拷贝后入队
+	Text    string // SentenceStart/SentenceEnd 时使用
+	Err     error  // SentenceEnd 时可选，表示本段错误
+	IsStart bool   // SentenceStart 时：是否为首包（用于统计）
+	OnStart func()
+	OnEnd   func(error)
+}
+
+// SessionAudioQueueCap 会话级音频队列容量，足够大以吸收预取并避免阻塞
+const SessionAudioQueueCap = 150
+
 type TTSQueueItem struct {
 	ctx         context.Context
-	llmResponse llm_common.LLMResponseStruct
+	llmResponse llm_common.LLMResponseStruct        // 单条模式使用
+	StreamChan  <-chan llm_common.LLMResponseStruct // 流式模式：非 nil 时优先从此 channel 读
 	onStartFunc func()
 	onEndFunc   func(err error)
 }
@@ -27,9 +51,11 @@ type TTSQueueItem struct {
 type TTSManagerOption func(*TTSManager)
 
 type TTSManager struct {
-	clientState     *ClientState
-	serverTransport *ServerTransport
-	ttsQueue        *util.Queue[TTSQueueItem]
+	clientState       *ClientState
+	serverTransport   *ServerTransport
+	ttsQueue          *util.Queue[TTSQueueItem]
+	sessionAudioQueue chan AudioQueueElem // 会话级全局音频队列，兼容帧与控制消息
+	interruptCh       chan struct{}       // 打断信号：收到后 runSenderLoop 清空 sessionAudioQueue 并继续
 
 	// 聊天历史音频缓存：持续累积多段TTS音频（Opus帧数组）
 	audioHistoryBuffer [][]byte
@@ -39,9 +65,11 @@ type TTSManager struct {
 // NewTTSManager 只接受WithClientState
 func NewTTSManager(clientState *ClientState, serverTransport *ServerTransport, opts ...TTSManagerOption) *TTSManager {
 	t := &TTSManager{
-		clientState:     clientState,
-		serverTransport: serverTransport,
-		ttsQueue:        util.NewQueue[TTSQueueItem](10),
+		clientState:       clientState,
+		serverTransport:   serverTransport,
+		ttsQueue:          util.NewQueue[TTSQueueItem](10),
+		sessionAudioQueue: make(chan AudioQueueElem, SessionAudioQueueCap),
+		interruptCh:       make(chan struct{}, 1),
 	}
 	for _, opt := range opts {
 		opt(t)
@@ -49,9 +77,161 @@ func NewTTSManager(clientState *ClientState, serverTransport *ServerTransport, o
 	return t
 }
 
-// 启动TTS队列消费协程
+// 启动TTS队列消费协程与统一发送协程（会话级全局音频队列）
 func (t *TTSManager) Start(ctx context.Context) {
+	go t.runSenderLoop(ctx)
 	t.processTTSQueue(ctx)
+}
+
+// runSenderLoop 唯一发送协程：从 sessionAudioQueue 取元素按类型分发，流控集中在此；仅 ctx 取消时退出；SessionCtx 取消或收到 TurnAbort 时清空队列并继续
+func (t *TTSManager) runSenderLoop(ctx context.Context) {
+	frameDuration := time.Duration(t.clientState.OutputAudioFormat.FrameDuration) * time.Millisecond
+	cacheFrameCount := 120 / t.clientState.OutputAudioFormat.FrameDuration
+	startTime := time.Now()
+	totalFrames := 0
+	needReportFirstFrame := false
+
+	for {
+		select {
+		case <-ctx.Done():
+			t.drainSessionAudioQueue()
+			log.Debugf("runSenderLoop ctx done, drained queue and exit")
+			return
+		case <-t.interruptCh:
+			t.drainSessionAudioQueue()
+			log.Debugf("runSenderLoop interrupt, drained queue and continue")
+			continue
+		case elem, ok := <-t.sessionAudioQueue:
+			if !ok {
+				return
+			}
+			switch elem.Kind {
+			case AudioQueueKindSentenceStart:
+				if elem.IsStart {
+					needReportFirstFrame = true
+				}
+				if elem.OnStart != nil {
+					elem.OnStart()
+				}
+				if elem.Text != "" {
+					if err := t.serverTransport.SendSentenceStart(elem.Text); err != nil {
+						log.Errorf("发送 TTS 文本失败: %s, %v", elem.Text, err)
+						if elem.OnEnd != nil {
+							elem.OnEnd(err)
+						}
+						continue
+					}
+				}
+			case AudioQueueKindFrame:
+				if totalFrames == 0 {
+					startTime = time.Now()
+				}
+				nextFrameTime := startTime.Add(time.Duration(totalFrames-cacheFrameCount) * frameDuration)
+				if now := time.Now(); now.Before(nextFrameTime) {
+					sleepDuration := nextFrameTime.Sub(now)
+					select {
+					case <-ctx.Done():
+						_ = t.serverTransport.SendTtsStop()
+						t.drainSessionAudioQueue()
+						return
+					case <-time.After(sleepDuration):
+					}
+				}
+				if err := t.serverTransport.SendAudio(elem.Data); err != nil {
+					log.Errorf("发送 TTS 音频失败: len: %d, %v", len(elem.Data), err)
+					continue
+				}
+				t.audioMutex.Lock()
+				frameCopy := make([]byte, len(elem.Data))
+				copy(frameCopy, elem.Data)
+				t.audioHistoryBuffer = append(t.audioHistoryBuffer, frameCopy)
+				t.audioMutex.Unlock()
+				totalFrames++
+				if needReportFirstFrame && totalFrames == 1 {
+					log.Debugf("从接收音频结束 asr->llm->tts首帧 整体 耗时: %d ms", t.clientState.GetAsrLlmTtsDuration())
+					needReportFirstFrame = false
+				}
+			case AudioQueueKindSentenceEnd:
+				if elem.Text != "" {
+					if err := t.serverTransport.SendSentenceEnd(elem.Text); err != nil {
+						log.Errorf("发送 TTS 文本失败: %s, %v", elem.Text, err)
+					}
+				}
+				if elem.OnEnd != nil {
+					elem.OnEnd(elem.Err)
+				}
+			case AudioQueueKindTtsStart:
+				if err := t.serverTransport.SendTtsStart(); err != nil {
+					log.Errorf("发送 TtsStart 失败: %v", err)
+				}
+				// 新语音段：仅重置帧计数，startTime 在收到第一帧时设置
+				totalFrames = 0
+			case AudioQueueKindTtsStop:
+				// 精确等待：本段已发送 totalFrames 帧，等播放到最后一帧结束再发 TtsStop
+				expectedPlayEnd := startTime.Add(time.Duration(totalFrames) * frameDuration)
+				if now := time.Now(); now.Before(expectedPlayEnd) {
+					sleepDuration := expectedPlayEnd.Sub(now)
+					select {
+					case <-ctx.Done():
+						_ = t.serverTransport.SendTtsStop()
+						t.drainSessionAudioQueue()
+						return
+					case <-time.After(sleepDuration):
+					}
+				}
+				//固定150ms等待，确保客户端播放完成
+				time.Sleep(150 * time.Millisecond)
+				if err := t.serverTransport.SendTtsStop(); err != nil {
+					log.Errorf("发送 TtsStop 失败: %v", err)
+				}
+			}
+		}
+	}
+}
+
+// drainSessionAudioQueue ctx 取消时清空队列，丢弃未发送元素
+func (t *TTSManager) drainSessionAudioQueue() {
+	for {
+		select {
+		case _, ok := <-t.sessionAudioQueue:
+			if !ok {
+				return
+			}
+		default:
+			return
+		}
+	}
+}
+
+// ClearSessionAudioQueue 清空会话级音频队列（可由外部在 ctx 取消时调用）
+func (t *TTSManager) ClearSessionAudioQueue() {
+	t.drainSessionAudioQueue()
+}
+
+// InterruptAndClearQueue 触发打断：通知 runSenderLoop 清空 sessionAudioQueue 后继续运行（非阻塞）
+func (t *TTSManager) InterruptAndClearQueue() {
+	select {
+	case t.interruptCh <- struct{}{}:
+	default:
+	}
+}
+
+// EnqueueTtsStart 向会话级音频队列投递 TtsStart，由 runSenderLoop 统一发送；队列满时阻塞直到入队或 ctx.Done
+func (t *TTSManager) EnqueueTtsStart(ctx context.Context) {
+	select {
+	case t.sessionAudioQueue <- AudioQueueElem{Kind: AudioQueueKindTtsStart}:
+	case <-ctx.Done():
+		return
+	}
+}
+
+// EnqueueTtsStop 向会话级音频队列投递 TtsStop，由 runSenderLoop 统一发送；队列满时阻塞直到入队或 ctx.Done
+func (t *TTSManager) EnqueueTtsStop(ctx context.Context) {
+	select {
+	case t.sessionAudioQueue <- AudioQueueElem{Kind: AudioQueueKindTtsStop}:
+	case <-ctx.Done():
+		return
+	}
 }
 
 func (t *TTSManager) processTTSQueue(ctx context.Context) {
@@ -64,22 +244,65 @@ func (t *TTSManager) processTTSQueue(ctx context.Context) {
 			continue
 		}
 
+		if item.StreamChan != nil {
+			log.Debugf("processTTSQueue start, stream mode")
+			t.handleStreamTts(item)
+			log.Debugf("processTTSQueue end, stream mode")
+			continue
+		}
+
+		// 非流式：由 handleTts 生成并推送 SentenceStart → Frame… → SentenceEnd
 		log.Debugf("processTTSQueue start, text: %s", item.llmResponse.Text)
-
-		if item.onStartFunc != nil {
-			item.onStartFunc()
-		}
-		err = t.handleTts(item.ctx, item.llmResponse)
-		if item.onEndFunc != nil {
-			item.onEndFunc(err)
-		}
-		log.Debugf("processTTSQueue end, text: %s", item.llmResponse.Text)
-
+		t.handleTts(item.ctx, item.llmResponse, item.onStartFunc, item.onEndFunc)
+		log.Debugf("processTTSQueue end, text: %s (pushed)", item.llmResponse.Text)
 	}
 }
 
 func (t *TTSManager) ClearTTSQueue() {
 	t.ttsQueue.Clear()
+}
+
+// handleTts 单条 TTS：生成并向 sessionAudioQueue 推送 SentenceStart → Frame… → SentenceEnd
+func (t *TTSManager) handleTts(ctx context.Context, llmResponse llm_common.LLMResponseStruct, onStartFunc func(), onEndFunc func(error)) {
+	if llmResponse.Text == "" {
+		if onEndFunc != nil {
+			onEndFunc(nil)
+		}
+		return
+	}
+	outChan, release, genErr := t.generateTtsOnly(ctx, llmResponse)
+	if genErr != nil {
+		log.Errorf("handleTts gen err, text: %s, err: %v", llmResponse.Text, genErr)
+		if onEndFunc != nil {
+			onEndFunc(genErr)
+		}
+		return
+	}
+	if outChan == nil {
+		if onEndFunc != nil {
+			onEndFunc(nil)
+		}
+		return
+	}
+	t.sessionAudioQueue <- AudioQueueElem{
+		Kind:    AudioQueueKindSentenceStart,
+		Text:    llmResponse.Text,
+		IsStart: llmResponse.IsStart,
+		OnStart: onStartFunc,
+	}
+	for frame := range outChan {
+		frameCopy := make([]byte, len(frame))
+		copy(frameCopy, frame)
+		t.sessionAudioQueue <- AudioQueueElem{Kind: AudioQueueKindFrame, Data: frameCopy}
+	}
+	if release != nil {
+		release()
+	}
+	t.sessionAudioQueue <- AudioQueueElem{
+		Kind:  AudioQueueKindSentenceEnd,
+		Text:  llmResponse.Text,
+		OnEnd: onEndFunc,
+	}
 }
 
 // 处理文本内容响应（异步 TTS 入队）
@@ -185,48 +408,71 @@ func extractVoiceID(config map[string]interface{}) string {
 	return ""
 }
 
-// 同步 TTS 处理
-func (t *TTSManager) handleTts(ctx context.Context, llmResponse llm_common.LLMResponseStruct) error {
-	log.Debugf("handleTts start, text: %s", llmResponse.Text)
-	defer log.Debugf("handleTts end, text: %s", llmResponse.Text)
+// generateTtsOnly 方案 C：仅做 TTS 生成，不发送；返回音频 channel 与发送完成后需调用的 ReleaseFunc
+func (t *TTSManager) generateTtsOnly(ctx context.Context, llmResponse llm_common.LLMResponseStruct) (outputChan <-chan []byte, releaseFunc func(), err error) {
 	if llmResponse.Text == "" {
-		return nil
+		return nil, nil, nil
 	}
-
-	// 获取TTS Provider实例
 	ttsWrapper, err := t.getTTSProviderInstance()
 	if err != nil {
 		log.Errorf("获取TTS Provider实例失败: %v", err)
-		return err
+		return nil, nil, err
 	}
-	defer pool.Release(ttsWrapper)
-
 	ttsProviderInstance := ttsWrapper.GetProvider()
-
-	// 使用带上下文的TTS处理
-	outputChan, err := ttsProviderInstance.TextToSpeechStream(ctx, llmResponse.Text, t.clientState.OutputAudioFormat.SampleRate, t.clientState.OutputAudioFormat.Channels, t.clientState.OutputAudioFormat.FrameDuration)
+	ch, err := ttsProviderInstance.TextToSpeechStream(ctx, llmResponse.Text, t.clientState.OutputAudioFormat.SampleRate, t.clientState.OutputAudioFormat.Channels, t.clientState.OutputAudioFormat.FrameDuration)
 	if err != nil {
+		pool.Release(ttsWrapper)
 		log.Errorf("生成 TTS 音频失败: %v", err)
-		return fmt.Errorf("生成 TTS 音频失败: %v", err)
+		return nil, nil, fmt.Errorf("生成 TTS 音频失败: %v", err)
 	}
+	return ch, func() { pool.Release(ttsWrapper) }, nil
+}
 
-	if err := t.serverTransport.SendSentenceStart(llmResponse.Text); err != nil {
-		log.Errorf("发送 TTS 文本失败: %s, %v", llmResponse.Text, err)
-		return fmt.Errorf("发送 TTS 文本失败: %s, %v", llmResponse.Text, err)
+// handleStreamTts 流式 TTS：从 item.StreamChan 读并逐条 generateTtsOnly，向 sessionAudioQueue 推送 SentenceStart → Frame… → SentenceEnd
+func (t *TTSManager) handleStreamTts(item TTSQueueItem) {
+	firstSegment := true
+	for {
+		select {
+		case <-item.ctx.Done():
+			t.sessionAudioQueue <- AudioQueueElem{Kind: AudioQueueKindSentenceEnd, OnEnd: item.onEndFunc, Err: item.ctx.Err()}
+			return
+		case resp, ok := <-item.StreamChan:
+			if !ok {
+				t.sessionAudioQueue <- AudioQueueElem{Kind: AudioQueueKindSentenceEnd, OnEnd: item.onEndFunc}
+				return
+			}
+			outChan, release, genErr := t.generateTtsOnly(item.ctx, resp)
+			if genErr != nil {
+				if firstSegment {
+					t.sessionAudioQueue <- AudioQueueElem{Kind: AudioQueueKindSentenceStart, OnStart: item.onStartFunc}
+				}
+				t.sessionAudioQueue <- AudioQueueElem{Kind: AudioQueueKindSentenceEnd, OnEnd: item.onEndFunc, Err: genErr}
+				return
+			}
+			if outChan == nil {
+				continue
+			}
+			startElem := AudioQueueElem{
+				Kind:    AudioQueueKindSentenceStart,
+				Text:    resp.Text,
+				IsStart: resp.IsStart,
+			}
+			if firstSegment {
+				startElem.OnStart = item.onStartFunc
+				firstSegment = false
+			}
+			t.sessionAudioQueue <- startElem
+			for frame := range outChan {
+				frameCopy := make([]byte, len(frame))
+				copy(frameCopy, frame)
+				t.sessionAudioQueue <- AudioQueueElem{Kind: AudioQueueKindFrame, Data: frameCopy}
+			}
+			if release != nil {
+				release()
+			}
+			t.sessionAudioQueue <- AudioQueueElem{Kind: AudioQueueKindSentenceEnd, Text: resp.Text}
+		}
 	}
-
-	// 发送音频帧
-	if err := t.SendTTSAudio(ctx, outputChan, llmResponse.IsStart); err != nil {
-		log.Errorf("发送 TTS 音频失败: %s, %v", llmResponse.Text, err)
-		return fmt.Errorf("发送 TTS 音频失败: %s, %v", llmResponse.Text, err)
-	}
-
-	if err := t.serverTransport.SendSentenceEnd(llmResponse.Text); err != nil {
-		log.Errorf("发送 TTS 文本失败: %s, %v", llmResponse.Text, err)
-		return fmt.Errorf("发送 TTS 文本失败: %s, %v", llmResponse.Text, err)
-	}
-
-	return nil
 }
 
 // getAlignedDuration 计算当前时间与开始时间的差值，向上对齐到frameDuration
@@ -237,7 +483,7 @@ func getAlignedDuration(startTime time.Time, frameDuration time.Duration) time.D
 	return time.Duration(alignedMs) * time.Millisecond
 }
 
-func (t *TTSManager) SendTTSAudio(ctx context.Context, audioChan chan []byte, isStart bool) error {
+func (t *TTSManager) SendTTSAudio(ctx context.Context, audioChan <-chan []byte, isStart bool) error {
 	totalFrames := 0 // 跟踪已发送的总帧数
 
 	isStatistic := true

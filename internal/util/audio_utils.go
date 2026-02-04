@@ -210,12 +210,27 @@ func (d *AudioDecoder) RunWavDecoder(startTs int64, isRaw bool) error {
 		sampleRate = int(uint32(header[24]) | uint32(header[25])<<8 | uint32(header[26])<<16 | uint32(header[27])<<24)
 		// 通道数: 字节22-23
 		channels = int(uint16(header[22]) | uint16(header[23])<<8)
-
+		if channels < 1 {
+			channels = 1
+			log.Warnf("WAV头部通道数为0，按单声道处理")
+		}
+		if sampleRate < 1 {
+			sampleRate = 24000
+			log.Warnf("WAV头部采样率为0，按 24000 Hz 处理")
+		}
 		log.Debugf("WAV格式: %d Hz, %d 通道", sampleRate, channels)
 	} else {
 		// 对于原始PCM数据，使用format中的参数
 		sampleRate = int(d.format.SampleRate)
 		channels = d.format.NumChannels
+		if channels < 1 {
+			channels = 1
+			log.Warnf("PCM 通道数为0，按单声道处理")
+		}
+		if sampleRate < 1 {
+			sampleRate = 24000
+			log.Warnf("PCM 采样率为0，按 24000 Hz 处理")
+		}
 		log.Debugf("原始PCM格式: %d Hz, %d 通道", sampleRate, channels)
 	}
 

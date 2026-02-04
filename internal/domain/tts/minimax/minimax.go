@@ -217,9 +217,10 @@ func (p *MinimaxTTSProvider) TextToSpeechStream(ctx context.Context, text string
 	var wg sync.WaitGroup
 	wg.Add(1)
 
-	// 启动读取和处理 goroutine
+	// 启动读取和处理 goroutine；锁在此 goroutine 内统一由 defer 释放，确保无论正常结束、错误或 panic 都会释放
 	go func() {
 		defer wg.Done()
+		defer p.sendMutex.Unlock()
 		defer func() {
 			pipeWriter.Close()
 			pipeReader.Close()
@@ -263,7 +264,6 @@ func (p *MinimaxTTSProvider) processStreamTTS(ctx context.Context, conn *websock
 	if err := p.sendMessage(conn, startMsg); err != nil {
 		log.Errorf("发送任务开始消息失败: %v", err)
 		p.clearConnection()
-		p.sendMutex.Unlock()
 		return
 	}
 
@@ -278,7 +278,6 @@ func (p *MinimaxTTSProvider) processStreamTTS(ctx context.Context, conn *websock
 			log.Errorf("读取任务开始确认失败: %v", err)
 		}
 		p.clearConnection()
-		p.sendMutex.Unlock()
 		return
 	}
 
@@ -290,7 +289,6 @@ func (p *MinimaxTTSProvider) processStreamTTS(ctx context.Context, conn *websock
 			log.Errorf("错误详情: status_code=%d, status_msg=%s", msg.BaseResp.StatusCode, msg.BaseResp.StatusMsg)
 		}
 		p.clearConnection()
-		p.sendMutex.Unlock()
 		return
 	}
 	// 重置读取超时
@@ -307,7 +305,6 @@ func (p *MinimaxTTSProvider) processStreamTTS(ctx context.Context, conn *websock
 	if err := p.sendMessage(conn, continueMsg); err != nil {
 		log.Errorf("发送文本消息失败: %v", err)
 		p.clearConnection()
-		p.sendMutex.Unlock()
 		return
 	}
 
@@ -343,7 +340,6 @@ func (p *MinimaxTTSProvider) processStreamTTS(ctx context.Context, conn *websock
 
 			// 清空连接状态，因为服务器已经关闭了连接
 			p.clearConnection()
-			p.sendMutex.Unlock()
 			return
 		default:
 		}
@@ -360,7 +356,6 @@ func (p *MinimaxTTSProvider) processStreamTTS(ctx context.Context, conn *websock
 					log.Errorf("WebSocket关闭帧详情: code=%d, text=%s", closeErr.Code, closeErr.Text)
 				}
 				p.clearConnection()
-				p.sendMutex.Unlock()
 				return
 			}
 			// 正常关闭或读取错误
@@ -368,7 +363,6 @@ func (p *MinimaxTTSProvider) processStreamTTS(ctx context.Context, conn *websock
 			if closeErr, ok := err.(*websocket.CloseError); ok {
 				log.Debugf("WebSocket关闭帧详情: code=%d, text=%s", closeErr.Code, closeErr.Text)
 			}
-			p.sendMutex.Unlock()
 			return
 		}
 
@@ -383,7 +377,6 @@ func (p *MinimaxTTSProvider) processStreamTTS(ctx context.Context, conn *websock
 				log.Errorf("错误详情: status_code=%d, status_msg=%s", msg.BaseResp.StatusCode, msg.BaseResp.StatusMsg)
 			}
 			p.clearConnection()
-			p.sendMutex.Unlock()
 			return
 		}
 
@@ -401,6 +394,7 @@ func (p *MinimaxTTSProvider) processStreamTTS(ctx context.Context, conn *websock
 			// 写入管道供解码器处理
 			if _, err := pipeWriter.Write(audioBytes); err != nil {
 				log.Errorf("写入音频数据到管道失败: %v", err)
+				p.clearConnection()
 				return
 			}
 		}
@@ -415,7 +409,6 @@ func (p *MinimaxTTSProvider) processStreamTTS(ctx context.Context, conn *websock
 			// 清空连接状态，因为服务器已经关闭了连接
 			// 下次使用时需要创建新连接
 			p.clearConnection()
-			p.sendMutex.Unlock()
 			return
 		}
 	}

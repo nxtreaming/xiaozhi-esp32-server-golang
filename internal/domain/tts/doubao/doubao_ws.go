@@ -215,9 +215,10 @@ func (p *DoubaoWSProvider) TextToSpeechStream(ctx context.Context, text string, 
 	var wg sync.WaitGroup
 	wg.Add(1)
 
-	// 启动读取 goroutine
+	// 启动读取 goroutine；锁在此 goroutine 内统一由 defer 释放，确保无论正常结束、错误或 panic 都会释放
 	go func() {
 		defer wg.Done()
+		defer p.sendMutex.Unlock()
 		defer func() {
 			pipeReader.Close()
 			pipeWriter.Close()
@@ -269,13 +270,6 @@ func (p *DoubaoWSProvider) TextToSpeechStream(ctx context.Context, text string, 
 			// 重置读取超时
 			conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 		}
-	}()
-
-	// 在后台等待 goroutine 完成并释放锁
-	go func() {
-		wg.Wait()
-		p.sendMutex.Unlock()
-		log.Debugf("doubao_ws TextToSpeechStream goroutine 完成，已释放 sendMutex")
 	}()
 
 	return outputOpusChan, nil

@@ -4,6 +4,7 @@ func (s *ChatSession) StopSpeaking(isSendTtsStop bool) {
 	s.ClearChatTextQueue()
 	s.llmManager.ClearLLMResponseQueue()
 	s.ttsManager.ClearTTSQueue()
+	s.ttsManager.InterruptAndClearQueue()
 
 	s.clientState.SessionCtx.Cancel()
 

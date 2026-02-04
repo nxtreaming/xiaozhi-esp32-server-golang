@@ -63,16 +63,31 @@ func (a *Asr) RetireAsrResult(ctx context.Context) (string, bool, error) {
 			}
 
 			// 如果是 funasr 的流式模式（online），直接返回 IsFinal 中的文字
-			if a.AsrType == "funasr" && a.Mode == "2pass" && result.IsFinal {
-				return result.Text, true, nil
+			if a.AsrType == "funasr" {
+				if a.Mode == "2pass" || a.Mode == "online" {
+					//2pass模式下只处理 2pass-offline的结果
+					if result.Mode == "2pass-offline" {
+						if result.Text != "" {
+							a.AsrResult.WriteString(result.Text)
+						}
+					}
+				}
+				if a.Mode == "offline" {
+					return result.Text, true, nil
+				}
+
+				if a.AutoEnd || result.IsFinal {
+					return result.Text, true, nil
+				}
+			} else {
+				// 其他情况按原有逻辑执行
+				a.AsrResult.WriteString(result.Text)
+				if a.AutoEnd || result.IsFinal {
+					text := a.AsrResult.String()
+					return text, true, nil
+				}
 			}
 
-			// 其他情况按原有逻辑执行
-			a.AsrResult.WriteString(result.Text)
-			if a.AutoEnd || result.IsFinal {
-				text := a.AsrResult.String()
-				return text, true, nil
-			}
 			if !ok {
 				log.Debugf("asr result channel closed")
 				return "", true, nil
