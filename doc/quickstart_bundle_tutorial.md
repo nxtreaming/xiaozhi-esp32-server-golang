@@ -6,9 +6,9 @@
 
 | 平台 | 文件名 |
 |-----|-------|
-| Windows | `xiaozhi-aio-windows-xxx.zip` |
-| Linux | `xiaozhi-aio-linux-xxx.tar.gz` |
-| macOS | `xiaozhi-aio-macos-xxx.tar.gz` |
+| Windows | `xiaozhi-server-windows-xxx.zip` |
+| Linux | `xiaozhi-server-linux-xxx.tar.gz` |
+| macOS | `xiaozhi-server-macos-xxx.tar.gz` |
 
 ---
 
@@ -19,7 +19,6 @@
 ```
 xiaozhi-aio/
 ├── xiaozhi_server          # 主程序
-├── xiaozhi_manager         # 声纹识别服务
 ├── config/                 # 配置文件目录
 ├── models/                 # 模型文件目录（如使用本地ASR/TTS）
 └── data/                   # 数据目录
@@ -30,19 +29,12 @@ xiaozhi-aio/
 ## 启动服务
 
 ### Windows
-双击 `xiaozhi_server.exe`
+双击 `start.bat`
 
 ### Linux / macOS
 ```bash
 chmod +x xiaozhi_server
 ./xiaozhi_server
-```
-
-启动成功后控制台输出：
-
-```
-[INFO] Server started on :8080
-[INFO] WebSocket server started on :8765
 ```
 
 ---
@@ -66,15 +58,7 @@ chmod +x xiaozhi_server
 
 ## 声纹识别服务（可选）
 
-如需声纹识别功能，运行 `xiaozhi_manager`：
-
-```bash
-# Windows
-xiaozhi_manager.exe
-
-# Linux/macOS
-./xiaozhi_manager
-```
+程序中已集成声纹服务
 
 ---
 
