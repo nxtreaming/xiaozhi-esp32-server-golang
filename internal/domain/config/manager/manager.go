@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"strings"
 	"time"
 	"xiaozhi-esp32-server-golang/internal/components/http"
 	"xiaozhi-esp32-server-golang/internal/domain/config/types"
@@ -225,6 +227,71 @@ func (c *ConfigManager) LoadSystemConfigToViper(ctx context.Context) error {
 	// viper.MergeConfigMap(configMap)
 
 	log.Log().Info("系统配置已成功加载到viper", "config_size", len(configJSON))
+	return nil
+}
+
+// SwitchDeviceRoleByName 按角色名（支持模糊匹配）切换设备角色
+func (c *ConfigManager) SwitchDeviceRoleByName(ctx context.Context, deviceID string, roleName string) (string, error) {
+	deviceID = strings.TrimSpace(deviceID)
+	roleName = strings.TrimSpace(roleName)
+	if deviceID == "" {
+		return "", fmt.Errorf("deviceID 不能为空")
+	}
+	if roleName == "" {
+		return "", fmt.Errorf("roleName 不能为空")
+	}
+
+	var response struct {
+		Data struct {
+			RoleName string `json:"role_name"`
+		} `json:"data"`
+		Error string `json:"error"`
+	}
+
+	path := fmt.Sprintf("/api/internal/devices/%s/switch-role", url.PathEscape(deviceID))
+	err := c.client.DoRequest(ctx, http.RequestOptions{
+		Method: "POST",
+		Path:   path,
+		Body: map[string]string{
+			"role_name": roleName,
+		},
+		Response: &response,
+	})
+	if err != nil {
+		return "", fmt.Errorf("切换设备角色失败: %w", err)
+	}
+	if response.Error != "" {
+		return "", fmt.Errorf(response.Error)
+	}
+	if strings.TrimSpace(response.Data.RoleName) == "" {
+		return "", fmt.Errorf("切换设备角色失败: 未返回匹配角色")
+	}
+	return response.Data.RoleName, nil
+}
+
+// RestoreDeviceDefaultRole 恢复设备默认角色（清空设备绑定角色）
+func (c *ConfigManager) RestoreDeviceDefaultRole(ctx context.Context, deviceID string) error {
+	deviceID = strings.TrimSpace(deviceID)
+	if deviceID == "" {
+		return fmt.Errorf("deviceID 不能为空")
+	}
+
+	var response struct {
+		Error string `json:"error"`
+	}
+
+	path := fmt.Sprintf("/api/internal/devices/%s/restore-default-role", url.PathEscape(deviceID))
+	err := c.client.DoRequest(ctx, http.RequestOptions{
+		Method:   "POST",
+		Path:     path,
+		Response: &response,
+	})
+	if err != nil {
+		return fmt.Errorf("恢复默认角色失败: %w", err)
+	}
+	if response.Error != "" {
+		return fmt.Errorf(response.Error)
+	}
 	return nil
 }
 

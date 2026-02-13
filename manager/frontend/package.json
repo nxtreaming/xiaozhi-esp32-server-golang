@@ -7,7 +7,7 @@
     "dev": "vite",
     "dev2": "set VITE_API_TARGET=http://192.168.209.138:8080 && vite",
     "dev3": "set VITE_API_TARGET=http://127.0.0.1:8080 && vite",
-    "build": "vite build && cp diagnose.js dist/",
+    "build": "vite build && node -e \"require('fs').copyFileSync('diagnose.js','dist/diagnose.js')\"",
     "preview": "vite preview"
   },
   "dependencies": {

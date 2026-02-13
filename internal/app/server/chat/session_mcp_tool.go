@@ -11,8 +11,11 @@ import (
 	"sync"
 	"time"
 
+	user_config "xiaozhi-esp32-server-golang/internal/domain/config"
 	llm_memory "xiaozhi-esp32-server-golang/internal/domain/memory/llm_memory"
 	log "xiaozhi-esp32-server-golang/logger"
+
+	"github.com/spf13/viper"
 )
 
 //此文件处理 local mcp tool 与 session绑定 的工具调用
@@ -117,6 +120,50 @@ func (c *ChatManager) LocalMcpPlayMusic(ctx context.Context, musicParams *PlayMu
 
 	log.Infof("找到音乐: %s, URL: %s", realMusicName, musicURL)
 
+	return nil
+}
+
+// LocalMcpSwitchDeviceRole 按角色名称切换设备角色（支持模糊匹配）
+func (c *ChatManager) LocalMcpSwitchDeviceRole(ctx context.Context, roleName string) (string, error) {
+	roleName = strings.TrimSpace(roleName)
+	if roleName == "" {
+		return "", fmt.Errorf("role_name 不能为空")
+	}
+
+	configProvider, err := user_config.GetProvider(viper.GetString("config_provider.type"))
+	if err != nil {
+		return "", fmt.Errorf("获取配置提供者失败: %w", err)
+	}
+
+	matchedRoleName, err := configProvider.SwitchDeviceRoleByName(ctx, c.DeviceID, roleName)
+	if err != nil {
+		return "", err
+	}
+
+	if err := c.ReloadDeviceConfig(ctx); err != nil {
+		return "", fmt.Errorf("角色已切换，但刷新会话配置失败: %w", err)
+	}
+
+	log.Infof("设备 %s 切换角色成功, 请求=%s, 匹配=%s", c.DeviceID, roleName, matchedRoleName)
+	return matchedRoleName, nil
+}
+
+// LocalMcpRestoreDeviceDefaultRole 恢复设备默认角色
+func (c *ChatManager) LocalMcpRestoreDeviceDefaultRole(ctx context.Context) error {
+	configProvider, err := user_config.GetProvider(viper.GetString("config_provider.type"))
+	if err != nil {
+		return fmt.Errorf("获取配置提供者失败: %w", err)
+	}
+
+	if err := configProvider.RestoreDeviceDefaultRole(ctx, c.DeviceID); err != nil {
+		return err
+	}
+
+	if err := c.ReloadDeviceConfig(ctx); err != nil {
+		return fmt.Errorf("默认角色已恢复，但刷新会话配置失败: %w", err)
+	}
+
+	log.Infof("设备 %s 恢复默认角色成功", c.DeviceID)
 	return nil
 }
 

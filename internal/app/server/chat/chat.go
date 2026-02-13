@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/spf13/viper"
@@ -94,23 +95,18 @@ func GenClientState(pctx context.Context, deviceID string) (*ClientState, error)
 	}
 
 	clientState := &ClientState{
-		IsActivated:  isDeviceActivated,
-		Dialogue:     &Dialogue{},
-		Abort:        false,
-		ListenMode:   "auto",
-		DeviceID:     deviceID,
-		AgentID:      deviceConfig.AgentId,
-		Ctx:          ctx,
-		Cancel:       cancel,
-		SystemPrompt: deviceConfig.SystemPrompt,
-		DeviceConfig: deviceConfig,
-		OutputAudioFormat: types_audio.AudioFormat{
-			SampleRate:    types_audio.SampleRate,
-			Channels:      types_audio.Channels,
-			FrameDuration: types_audio.FrameDuration,
-			Format:        types_audio.Format,
-		},
-		OpusAudioBuffer: make(chan []byte, 100),
+		IsActivated:       isDeviceActivated,
+		Dialogue:          &Dialogue{},
+		Abort:             false,
+		ListenMode:        "auto",
+		DeviceID:          deviceID,
+		AgentID:           deviceConfig.AgentId,
+		Ctx:               ctx,
+		Cancel:            cancel,
+		SystemPrompt:      deviceConfig.SystemPrompt,
+		DeviceConfig:      deviceConfig,
+		OutputAudioFormat: types_audio.AudioFormat{},
+		OpusAudioBuffer:   make(chan []byte, 100),
 		AsrAudioBuffer: &AsrAudioBuffer{
 			PcmData:          make([]float32, 0),
 			AudioBufferMutex: sync.RWMutex{},
@@ -123,15 +119,46 @@ func GenClientState(pctx context.Context, deviceID string) (*ClientState, error)
 		},
 		SessionCtx: Ctx{},
 	}
+	applyOutputAudioFormatForTTS(clientState)
 
+	return clientState, nil
+}
+
+func applyOutputAudioFormatForTTS(clientState *ClientState) {
+	clientState.OutputAudioFormat = types_audio.AudioFormat{
+		SampleRate:    types_audio.SampleRate,
+		Channels:      types_audio.Channels,
+		FrameDuration: types_audio.FrameDuration,
+		Format:        types_audio.Format,
+	}
 	ttsType := clientState.DeviceConfig.Tts.Provider
-	//如果使用 xiaozhi 或 edge_offline tts，则固定使用24000hz, 20ms帧长
-	if ttsType == constants.TtsTypeXiaozhi /*|| ttsType == constants.TtsTypeEdgeOffline*/ {
+	// 如果使用 xiaozhi tts，则固定使用24000hz, 20ms帧长
+	if ttsType == constants.TtsTypeXiaozhi {
 		clientState.OutputAudioFormat.SampleRate = 24000
 		clientState.OutputAudioFormat.FrameDuration = 20
 	}
+}
 
-	return clientState, nil
+// ReloadDeviceConfig 重新加载设备配置并应用到当前会话
+func (c *ChatManager) ReloadDeviceConfig(ctx context.Context) error {
+	configProvider, err := userconfig.GetProvider(viper.GetString("config_provider.type"))
+	if err != nil {
+		return fmt.Errorf("获取配置提供者失败: %w", err)
+	}
+
+	deviceConfig, err := configProvider.GetUserConfig(ctx, c.DeviceID)
+	if err != nil {
+		return fmt.Errorf("获取设备配置失败: %w", err)
+	}
+
+	c.clientState.AgentID = deviceConfig.AgentId
+	c.clientState.DeviceConfig = deviceConfig
+	c.clientState.SystemPrompt = deviceConfig.SystemPrompt
+	// 切换角色后清空声纹临时TTS配置，避免旧配置污染
+	c.clientState.SpeakerTTSConfig = nil
+	applyOutputAudioFormatForTTS(c.clientState)
+	log.Infof("设备 %s 配置已刷新，当前agent=%s", c.DeviceID, deviceConfig.AgentId)
+	return nil
 }
 
 func (c *ChatManager) Start() error {

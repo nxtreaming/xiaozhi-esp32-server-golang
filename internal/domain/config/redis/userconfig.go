@@ -201,6 +201,16 @@ func (u *UserConfig) GetSystemConfig(ctx context.Context) (string, error) {
 	return "", nil
 }
 
+// SwitchDeviceRoleByName Redis 模式不支持设备角色切换
+func (u *UserConfig) SwitchDeviceRoleByName(ctx context.Context, deviceID string, roleName string) (string, error) {
+	return "", fmt.Errorf("redis 配置提供者不支持按角色名切换设备角色")
+}
+
+// RestoreDeviceDefaultRole Redis 模式不支持恢复默认角色
+func (u *UserConfig) RestoreDeviceDefaultRole(ctx context.Context, deviceID string) error {
+	return fmt.Errorf("redis 配置提供者不支持恢复设备默认角色")
+}
+
 func (u *UserConfig) NotifyDeviceEvent(ctx context.Context, eventType string, eventData map[string]interface{}) {
 	// 实现设备事件通知逻辑
 	return

@@ -218,6 +218,12 @@ const routes = [
         name: 'AgentHistory',
         component: () => import('../views/user/AgentHistory.vue'),
         meta: { title: '聊天历史记录' }
+      },
+      {
+        path: 'user/roles',
+        name: 'UserRoles',
+        component: () => import('../views/user/Roles.vue'),
+        meta: { title: '我的角色' }
       }
     ]
   }

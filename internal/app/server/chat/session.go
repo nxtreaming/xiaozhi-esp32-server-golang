@@ -928,6 +928,11 @@ func (s *ChatSession) Close() {
 		}
 		log.Debugf("ChatSession.Close() 开始清理会话资源, 设备 %s", deviceID)
 
+		// 取消会话级别的上下文
+		if s.cancel != nil {
+			s.cancel()
+		}
+
 		// 停止说话和清理音频相关资源
 		s.StopSpeaking(true)
 
@@ -937,11 +942,6 @@ func (s *ChatSession) Close() {
 		// 关闭服务端传输
 		if s.serverTransport != nil {
 			s.serverTransport.Close()
-		}
-
-		// 取消会话级别的上下文
-		if s.cancel != nil {
-			s.cancel()
 		}
 
 		if s.speakerManager != nil {

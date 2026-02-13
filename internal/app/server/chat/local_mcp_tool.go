@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	mcp_manager "xiaozhi-esp32-server-golang/internal/domain/mcp"
@@ -48,6 +49,18 @@ func InitChatLocalMCPTools() {
 			Params:      struct{}{},
 			Handle:      clearConversationHistoryHandler,
 		},
+		"switch_device_role": {
+			Name:        "switch_device_role",
+			Description: "当用户要求把当前设备切换到某个角色时使用，参数 role_name 支持模糊匹配（会在全局角色和该设备所属用户角色中匹配）",
+			Params:      SwitchDeviceRoleParams{},
+			Handle:      switchDeviceRoleHandler,
+		},
+		"restore_device_default_role": {
+			Name:        "restore_device_default_role",
+			Description: "当用户要求恢复设备默认角色、取消当前设备角色覆盖时使用",
+			Params:      struct{}{},
+			Handle:      restoreDeviceDefaultRoleHandler,
+		},
 		/*"play_music": {
 			Name:        "play_music",
 			Description: "当用户想听歌、无聊时、想放空大脑时使用，用于播放指定名称的音乐，当用户想随便听一首音乐时请推荐出具体的歌曲名称，当有多个音乐播放工具时优先使用此工具，**此工具调用耗时较长，需要先返回友好的过渡性提示语**",
@@ -89,6 +102,10 @@ func RegisterLocalMcpFunc(name string, description string, params any, handle mc
 		return err
 	}
 	return nil
+}
+
+type SwitchDeviceRoleParams struct {
+	RoleName string `json:"role_name" description:"目标角色名称，支持模糊匹配" required:"true"`
 }
 
 // playMusicHandler 播放音乐的处理函数
@@ -267,6 +284,80 @@ func clearConversationHistoryHandler(ctx context.Context, argumentsInJSON string
 		}
 	}
 	log.Warn("从context中未找到chat_session_operator")
+	return "", fmt.Errorf("从context中未找到chat_session_operator")
+}
+
+// switchDeviceRoleHandler 切换设备角色的处理函数
+func switchDeviceRoleHandler(ctx context.Context, argumentsInJSON string) (string, error) {
+	log.Info("执行切换设备角色工具")
+
+	var params SwitchDeviceRoleParams
+	if argumentsInJSON == "" {
+		response := NewErrorResponse("switch_device_role", "缺少参数 role_name", "MISSING_ROLE_NAME", "请提供要切换的角色名称")
+		return response.ToJSON()
+	}
+	if err := json.Unmarshal([]byte(argumentsInJSON), &params); err != nil {
+		response := NewErrorResponse("switch_device_role", "参数解析失败", "PARSE_ERROR", "请检查 role_name 参数格式")
+		return response.ToJSON()
+	}
+	params.RoleName = strings.TrimSpace(params.RoleName)
+	if params.RoleName == "" {
+		response := NewErrorResponse("switch_device_role", "角色名称不能为空", "INVALID_ROLE_NAME", "请提供有效的 role_name")
+		return response.ToJSON()
+	}
+
+	if chatSessionOperatorValue := ctx.Value("chat_session_operator"); chatSessionOperatorValue != nil {
+		if chatSessionOperator, ok := chatSessionOperatorValue.(ChatSessionOperator); ok {
+			matchedRoleName, err := chatSessionOperator.LocalMcpSwitchDeviceRole(ctx, params.RoleName)
+			if err != nil {
+				log.Errorf("切换设备角色失败: %v", err)
+				response := NewErrorResponse("switch_device_role", fmt.Sprintf("切换角色失败: %v", err), "SWITCH_ROLE_FAILED", "请尝试更换角色名称或稍后重试")
+				return response.ToJSON()
+			}
+
+			response := NewActionResponse(
+				"switch_device_role",
+				"switch_device_role",
+				fmt.Sprintf("已切换到角色：%s", matchedRoleName),
+				"completed",
+				false,
+			)
+			response.Metadata = map[string]string{
+				"requested_role_name": params.RoleName,
+				"matched_role_name":   matchedRoleName,
+			}
+			return response.ToJSON()
+		}
+		return "", fmt.Errorf("从context中获取的chat_session_operator不是ChatSessionOperator类型")
+	}
+
+	return "", fmt.Errorf("从context中未找到chat_session_operator")
+}
+
+// restoreDeviceDefaultRoleHandler 恢复设备默认角色的处理函数
+func restoreDeviceDefaultRoleHandler(ctx context.Context, argumentsInJSON string) (string, error) {
+	log.Info("执行恢复设备默认角色工具")
+
+	if chatSessionOperatorValue := ctx.Value("chat_session_operator"); chatSessionOperatorValue != nil {
+		if chatSessionOperator, ok := chatSessionOperatorValue.(ChatSessionOperator); ok {
+			if err := chatSessionOperator.LocalMcpRestoreDeviceDefaultRole(ctx); err != nil {
+				log.Errorf("恢复设备默认角色失败: %v", err)
+				response := NewErrorResponse("restore_device_default_role", fmt.Sprintf("恢复默认角色失败: %v", err), "RESTORE_ROLE_FAILED", "请稍后重试")
+				return response.ToJSON()
+			}
+
+			response := NewActionResponse(
+				"restore_device_default_role",
+				"restore_device_default_role",
+				"已恢复设备默认角色",
+				"completed",
+				false,
+			)
+			return response.ToJSON()
+		}
+		return "", fmt.Errorf("从context中获取的chat_session_operator不是ChatSessionOperator类型")
+	}
+
 	return "", fmt.Errorf("从context中未找到chat_session_operator")
 }
 

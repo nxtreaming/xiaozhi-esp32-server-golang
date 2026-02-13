@@ -27,7 +27,12 @@
           <el-icon><Monitor /></el-icon>
           <span>智能体管理</span>
         </el-menu-item>
-        
+
+        <el-menu-item v-if="!authStore.isAdmin" index="/user/roles">
+          <el-icon><User /></el-icon>
+          <span>我的角色</span>
+        </el-menu-item>
+
         <el-menu-item v-if="!authStore.isAdmin" index="/speakers">
           <el-icon><Microphone /></el-icon>
           <span>声纹管理</span>

@@ -23,6 +23,7 @@ type Device struct {
 	ID           uint       `json:"id" gorm:"primarykey"`
 	UserID       uint       `json:"user_id" gorm:"not null"`
 	AgentID      uint       `json:"agent_id" gorm:"not null;default:0"`                                       // 智能体ID，一台设备只能属于一个智能体
+	RoleID       *uint      `json:"role_id" gorm:"index"`                                                     // 角色ID（可选，覆盖智能体配置）
 	DeviceCode   string     `json:"device_code" gorm:"type:varchar(100);uniqueIndex:idx_devices_device_code"` // 6位激活码
 	DeviceName   string     `json:"device_name" gorm:"type:varchar(100)"`
 	Challenge    string     `json:"challenge" gorm:"type:varchar(128)"`      // 激活挑战码
@@ -62,7 +63,38 @@ type Config struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// 全局角色模型
+// Role 角色模型（统一管理全局角色和用户角色）
+type Role struct {
+	ID          uint   `json:"id" gorm:"primarykey"`
+	UserID      *uint  `json:"user_id" gorm:"index"` // 所属用户ID，NULL表示全局角色
+	Name        string `json:"name" gorm:"type:varchar(100);not null"`
+	Description string `json:"description" gorm:"type:text"`
+	Prompt      string `json:"prompt" gorm:"type:text"` // 系统提示词
+
+	// LLM/TTS 配置（与 Agent 字段保持一致）
+	LLMConfigID *string `json:"llm_config_id" gorm:"type:varchar(100)"` // LLM配置ID
+
+	TTSConfigID *string `json:"tts_config_id" gorm:"type:varchar(100)"` // TTS配置ID
+	Voice       *string `json:"voice" gorm:"type:varchar(200)"`         // 音色值
+
+	// 角色类型和状态
+	RoleType string `json:"role_type" gorm:"type:varchar(20);default:'user';index"` // global/system/user
+	Status   string `json:"status" gorm:"type:varchar(20);default:'active';index"`  // active/inactive
+
+	// 排序和默认
+	SortOrder int  `json:"sort_order" gorm:"default:0"`           // 显示排序
+	IsDefault bool `json:"is_default" gorm:"default:false;index"` // 是否默认角色（仅全局角色）
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// TableName 指定表名
+func (Role) TableName() string {
+	return "roles"
+}
+
+// 全局角色模型（保留兼容，后续可迁移至 Role）
 type GlobalRole struct {
 	ID          uint      `json:"id" gorm:"primarykey"`
 	Name        string    `json:"name" gorm:"type:varchar(100);not null"`

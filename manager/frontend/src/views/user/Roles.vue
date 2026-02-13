@@ -1,15 +1,16 @@
 <template>
   <div class="roles-page">
     <div class="page-header">
-      <h2>全局角色管理</h2>
+      <h2>我的角色</h2>
       <el-button type="primary" @click="showCreateDialog = true">
         <el-icon><Plus /></el-icon>
-        创建全局角色
+        创建角色
       </el-button>
     </div>
 
+    <!-- 角色卡片列表 -->
     <el-row :gutter="12" class="roles-grid" v-loading="loading">
-      <el-col :xs="24" :sm="12" :lg="8" v-for="role in roles" :key="role.id" class="role-col">
+      <el-col :xs="24" :sm="12" :lg="8" v-for="role in userRoles" :key="role.id" class="role-col">
         <el-card class="role-card" shadow="hover">
           <template #header>
             <div class="card-header">
@@ -22,23 +23,19 @@
                       <el-icon><Edit /></el-icon>
                       编辑
                     </el-dropdown-item>
-                    <el-dropdown-item command="duplicate">
-                      <el-icon><CopyDocument /></el-icon>
-                      复制
-                    </el-dropdown-item>
-                    <el-dropdown-item command="toggle-status">
-                      <el-icon><SwitchButton /></el-icon>
-                      {{ isRoleActive(role) ? '关闭' : '开启' }}
-                    </el-dropdown-item>
-                    <el-dropdown-item command="set-default" :disabled="role.is_default">
-                      <el-icon><Star /></el-icon>
-                      {{ role.is_default ? '已默认' : '设为默认' }}
-                    </el-dropdown-item>
-                    <el-dropdown-item command="delete" divided>
-                      <el-icon><Delete /></el-icon>
-                      删除
-                    </el-dropdown-item>
-                  </el-dropdown-menu>
+                  <el-dropdown-item command="duplicate">
+                    <el-icon><CopyDocument /></el-icon>
+                    复制
+                  </el-dropdown-item>
+                  <el-dropdown-item command="toggle-status">
+                    <el-icon><SwitchButton /></el-icon>
+                    {{ isRoleActive(role) ? '关闭' : '开启' }}
+                  </el-dropdown-item>
+                  <el-dropdown-item command="delete" divided>
+                    <el-icon><Delete /></el-icon>
+                    删除
+                  </el-dropdown-item>
+                </el-dropdown-menu>
                 </template>
               </el-dropdown>
             </div>
@@ -51,7 +48,6 @@
               <el-tag size="small" :type="isRoleActive(role) ? 'success' : 'info'">
                 {{ isRoleActive(role) ? '开启' : '关闭' }}
               </el-tag>
-              <el-tag v-if="role.is_default" size="small" type="warning">默认角色</el-tag>
               <el-tag size="small" type="primary">LLM: {{ role.llm_config_id || '默认' }}</el-tag>
               <el-tag size="small" type="success">TTS: {{ role.tts_config_id || '默认' }}</el-tag>
               <el-tag v-if="role.voice" size="small" type="warning">音色: {{ role.voice }}</el-tag>
@@ -66,13 +62,15 @@
       </el-col>
     </el-row>
 
-    <el-empty v-if="!loading && roles.length === 0" description="暂无全局角色，点击右上角创建">
-      <el-button type="primary" @click="showCreateDialog = true">创建第一个全局角色</el-button>
+    <!-- 空状态 -->
+    <el-empty v-if="!loading && userRoles.length === 0" description="暂无角色，点击右上角创建">
+      <el-button type="primary" @click="showCreateDialog = true">创建第一个角色</el-button>
     </el-empty>
 
+    <!-- 创建/编辑角色弹窗 -->
     <el-dialog
       v-model="showCreateDialog"
-      :title="editingRole ? '编辑全局角色' : '创建全局角色'"
+      :title="editingRole ? '编辑角色' : '创建角色'"
       width="800px"
       @close="handleDialogClose"
     >
@@ -96,20 +94,6 @@
                 :rows="3"
                 placeholder="请输入角色描述"
               />
-            </el-form-item>
-
-            <el-form-item label="排序">
-              <el-input-number
-                v-model="form.sort_order"
-                :min="0"
-                :step="1"
-                style="width: 100%"
-                placeholder="数字越小越靠前"
-              />
-            </el-form-item>
-
-            <el-form-item label="默认角色">
-              <el-switch v-model="form.is_default" />
             </el-form-item>
           </section>
 
@@ -222,16 +206,17 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, MoreFilled, Edit, CopyDocument, Delete, SwitchButton, Star } from '@element-plus/icons-vue'
+import { Plus, MoreFilled, Edit, CopyDocument, Delete, SwitchButton } from '@element-plus/icons-vue'
 import api from '../../utils/api'
 
-const roles = ref([])
+const userRoles = ref([])
 const loading = ref(false)
 const saving = ref(false)
 const showCreateDialog = ref(false)
 const editingRole = ref(null)
 const formRef = ref()
 
+// 配置列表
 const llmConfigs = ref([])
 const ttsConfigs = ref([])
 const availableVoices = ref([])
@@ -245,10 +230,7 @@ const form = reactive({
   prompt: '',
   llm_config_id: null,
   tts_config_id: null,
-  voice: '',
-  status: 'active',
-  sort_order: 0,
-  is_default: false
+  voice: ''
 })
 
 const rules = {
@@ -256,13 +238,12 @@ const rules = {
   prompt: [{ required: true, message: '请输入系统提示词', trigger: 'blur' }]
 }
 
-const isRoleActive = (role) => role?.status !== 'inactive'
-
+// 加载角色列表
 const loadRoles = async () => {
   loading.value = true
   try {
-    const response = await api.get('/admin/roles/global')
-    roles.value = response.data.data || []
+    const response = await api.get('/user/roles')
+    userRoles.value = response.data.data?.user_roles || []
   } catch (error) {
     ElMessage.error('加载角色失败')
   } finally {
@@ -270,11 +251,12 @@ const loadRoles = async () => {
   }
 }
 
+// 加载配置列表
 const loadConfigs = async () => {
   try {
     const [llmRes, ttsRes] = await Promise.all([
-      api.get('/admin/llm-configs'),
-      api.get('/admin/tts-configs')
+      api.get('/user/llm-configs'),
+      api.get('/user/tts-configs')
     ])
     llmConfigs.value = llmRes.data.data || []
     ttsConfigs.value = ttsRes.data.data || []
@@ -283,6 +265,7 @@ const loadConfigs = async () => {
   }
 }
 
+// 卡片操作
 const handleCardAction = (command, role) => {
   switch (command) {
     case 'edit':
@@ -294,12 +277,24 @@ const handleCardAction = (command, role) => {
     case 'toggle-status':
       toggleRoleStatus(role)
       break
-    case 'set-default':
-      setDefaultRole(role)
-      break
     case 'delete':
       deleteRole(role.id)
       break
+  }
+}
+
+const isRoleActive = (role) => role?.status !== 'inactive'
+
+const toggleRoleStatus = async (role) => {
+  if (!role?.id) return
+
+  const action = isRoleActive(role) ? '关闭' : '开启'
+  try {
+    await api.patch(`/user/roles/${role.id}/toggle`)
+    ElMessage.success(`角色${action}成功`)
+    await loadRoles()
+  } catch (error) {
+    ElMessage.error('状态切换失败: ' + (error.response?.data?.error || error.message))
   }
 }
 
@@ -389,10 +384,7 @@ const editRole = (role) => {
     prompt: role.prompt || '',
     llm_config_id: role.llm_config_id || null,
     tts_config_id: role.tts_config_id || null,
-    voice: role.voice || '',
-    status: role.status || 'active',
-    sort_order: role.sort_order || 0,
-    is_default: role.is_default || false
+    voice: role.voice || ''
   })
   previousTtsConfigId.value = form.tts_config_id
   handleTtsConfigChange()
@@ -407,10 +399,7 @@ const duplicateRole = (role) => {
     prompt: role.prompt || '',
     llm_config_id: role.llm_config_id || null,
     tts_config_id: role.tts_config_id || null,
-    voice: role.voice || '',
-    status: role.status || 'active',
-    sort_order: role.sort_order || 0,
-    is_default: false
+    voice: role.voice || ''
   })
   previousTtsConfigId.value = form.tts_config_id
   handleTtsConfigChange()
@@ -427,10 +416,10 @@ const handleSave = async () => {
         const data = { ...form }
 
         if (editingRole.value) {
-          await api.put(`/admin/roles/global/${editingRole.value.id}`, data)
+          await api.put(`/user/roles/${editingRole.value.id}`, data)
           ElMessage.success('更新成功')
         } else {
-          await api.post('/admin/roles/global', data)
+          await api.post('/user/roles', data)
           ElMessage.success('创建成功')
         }
 
@@ -445,40 +434,15 @@ const handleSave = async () => {
   })
 }
 
-const toggleRoleStatus = async (role) => {
-  if (!role?.id) return
-
-  const action = isRoleActive(role) ? '关闭' : '开启'
-  try {
-    await api.patch(`/admin/roles/global/${role.id}/toggle`)
-    ElMessage.success(`角色${action}成功`)
-    await loadRoles()
-  } catch (error) {
-    ElMessage.error('状态切换失败: ' + (error.response?.data?.error || error.message))
-  }
-}
-
-const setDefaultRole = async (role) => {
-  if (!role?.id || role.is_default) return
-
-  try {
-    await api.patch(`/admin/roles/global/${role.id}/default`)
-    ElMessage.success('已设为默认角色')
-    await loadRoles()
-  } catch (error) {
-    ElMessage.error('设置默认失败: ' + (error.response?.data?.error || error.message))
-  }
-}
-
 const deleteRole = async (id) => {
   try {
-    await ElMessageBox.confirm('确定要删除这个全局角色吗？', '提示', {
+    await ElMessageBox.confirm('确定要删除这个角色吗？', '提示', {
       confirmButtonText: '确定',
       cancelButtonText: '取消',
       type: 'warning'
     })
 
-    await api.delete(`/admin/roles/global/${id}`)
+    await api.delete(`/user/roles/${id}`)
     ElMessage.success('删除成功')
     loadRoles()
   } catch (error) {
@@ -496,10 +460,7 @@ const resetForm = () => {
     prompt: '',
     llm_config_id: null,
     tts_config_id: null,
-    voice: '',
-    status: 'active',
-    sort_order: 0,
-    is_default: false
+    voice: ''
   })
   previousTtsConfigId.value = null
   clearVoiceOptions()

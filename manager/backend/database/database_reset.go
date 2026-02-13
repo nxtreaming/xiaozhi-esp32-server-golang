@@ -44,6 +44,7 @@ func InitWithReset(cfg config.DatabaseConfig) *gorm.DB {
 		&models.Agent{},
 		&models.Config{},
 		&models.GlobalRole{},
+		&models.Role{},
 		&models.SpeakerGroup{},
 		&models.SpeakerSample{},
 	)

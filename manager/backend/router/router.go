@@ -71,6 +71,8 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		api.PUT("/internal/history/messages/:message_id/audio", chatHistoryController.UpdateMessageAudio) // 更新消息音频（内部服务接口）
 		api.GET("/internal/history/messages", chatHistoryController.GetMessagesForInit)                   // 获取消息（用于初始化加载，内部服务接口）
 		api.POST("/internal/pool/stats", poolStatsController.ReportPoolStats)                             // 上报资源池统计数据（内部服务接口）
+		api.POST("/internal/devices/:device_name/switch-role", adminController.SwitchDeviceRoleByNameInternal)
+		api.POST("/internal/devices/:device_name/restore-default-role", adminController.RestoreDeviceDefaultRoleInternal)
 
 		// 需要认证的路由
 		auth := api.Group("")
@@ -79,10 +81,28 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			auth.GET("/profile", authController.GetProfile)
 			// 通用接口，获取系统中的设备信息
 			auth.GET("/dashboard/stats", userController.GetDashboardStats)
+			// 设备角色接口（管理员和普通用户均可访问，控制器内做权限校验）
+			auth.POST("/devices/:id/apply-role", adminController.ApplyRoleToDevice)
+
+			// 角色管理（文档主路径）
+			auth.GET("/roles", adminController.GetRolesNew)
+			auth.GET("/roles/:id", adminController.GetRoleNew)
+			auth.POST("/roles", adminController.CreateRoleNew)
+			auth.PUT("/roles/:id", adminController.UpdateRoleNew)
+			auth.DELETE("/roles/:id", adminController.DeleteRoleNew)
+			auth.PATCH("/roles/:id/toggle", adminController.ToggleRoleStatus)
 
 			// 用户路由
 			user := auth.Group("/user")
 			{
+				// 角色管理
+				user.GET("/roles", adminController.GetRolesNew)
+				user.GET("/roles/:id", adminController.GetRoleNew)
+				user.POST("/roles", adminController.CreateRoleNew)
+				user.PUT("/roles/:id", adminController.UpdateRoleNew)
+				user.DELETE("/roles/:id", adminController.DeleteRoleNew)
+				user.PATCH("/roles/:id/toggle", adminController.ToggleRoleStatus)
+
 				// 设备管理
 				user.GET("/devices", userController.GetMyDevices)
 				user.POST("/devices", userController.CreateDevice)
@@ -100,6 +120,13 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 				// 角色模板和音色选项
 				user.GET("/role-templates", userController.GetRoleTemplates)
 				user.GET("/voice-options", userController.GetVoiceOptions)
+
+				// 角色管理（暂时注释，待实现）
+				// user.GET("/roles", adminController.GetRoles)
+				// user.GET("/roles/:id", adminController.GetRole)
+				// user.POST("/roles", adminController.CreateRole)
+				// user.PUT("/roles/:id", adminController.UpdateRole)
+				// user.DELETE("/roles/:id", adminController.DeleteRole)
 
 				// 配置列表
 				user.GET("/llm-configs", userController.GetLLMConfigs)
@@ -213,11 +240,20 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 				admin.DELETE("/memory-configs/:id", adminController.DeleteMemoryConfig)
 				admin.POST("/memory-configs/:id/set-default", adminController.SetDefaultMemoryConfig)
 
-				// 全局角色管理
+				// 全局角色管理（保留兼容旧API）
 				admin.GET("/global-roles", adminController.GetGlobalRoles)
 				admin.POST("/global-roles", adminController.CreateGlobalRole)
 				admin.PUT("/global-roles/:id", adminController.UpdateGlobalRole)
 				admin.DELETE("/global-roles/:id", adminController.DeleteGlobalRole)
+
+				// 全局角色管理（新API）
+				admin.GET("/roles", adminController.GetRolesNew)
+				admin.GET("/roles/global", adminController.GetGlobalRolesNew)
+				admin.POST("/roles/global", adminController.CreateRoleNew)
+				admin.PUT("/roles/global/:id", adminController.UpdateRoleNew)
+				admin.DELETE("/roles/global/:id", adminController.DeleteRoleNew)
+				admin.PATCH("/roles/global/:id/toggle", adminController.ToggleRoleStatus)
+				admin.PATCH("/roles/global/:id/default", adminController.SetDefaultRole)
 
 				// 设备管理
 				admin.GET("/devices", adminController.GetDevices)

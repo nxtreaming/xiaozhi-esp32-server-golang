@@ -36,59 +36,61 @@
     </div>
 
     <div v-else class="devices-grid">
-      <el-row :gutter="24">
-        <el-col :xs="24" :sm="12" :md="8" :lg="6" v-for="device in devices" :key="device.id">
-          <div class="device-card">
-            <div class="device-header">
-              <div class="device-icon">
-                <el-icon size="28"><Monitor /></el-icon>
-              </div>
-              <div class="device-info">
-                <h3 class="device-name">{{ device.device_name || '未命名设备' }}</h3>
-                <p class="device-code">{{ device.device_code }}</p>
-              </div>
-              <div class="device-status">
-                <span :class="['status-dot', isDeviceOnline(device.last_active_at) ? 'online' : 'offline']"></span>
-                <span class="status-text">{{ isDeviceOnline(device.last_active_at) ? '在线' : '离线' }}</span>
-              </div>
+      <div v-for="device in devices" :key="device.id" class="device-item">
+        <div class="device-card">
+          <div class="device-header">
+            <div class="device-icon">
+              <el-icon size="28"><Monitor /></el-icon>
             </div>
-            
-            <div class="device-meta">
-              <div class="meta-row">
-                <span class="meta-label">设备类型</span>
-                <span class="meta-value">ESP32设备</span>
-              </div>
-              <div class="meta-row">
-                <span class="meta-label">激活状态</span>
-                <span class="meta-value">
-                  <el-tag :type="device.activated ? 'success' : 'warning'" size="small">
-                    {{ device.activated ? '已激活' : '未激活' }}
-                  </el-tag>
-                </span>
-              </div>
-              <div class="meta-row">
-                <span class="meta-label">最后活跃</span>
-                <span class="meta-value">{{ formatDate(device.last_active_at) }}</span>
-              </div>
-              <div class="meta-row">
-                <span class="meta-label">创建时间</span>
-                <span class="meta-value">{{ formatDate(device.created_at) }}</span>
-              </div>
+            <div class="device-info">
+              <h3 class="device-name">{{ device.device_name || '未命名设备' }}</h3>
+              <p class="device-code">{{ device.device_code }}</p>
             </div>
-            
-            <div class="device-actions">
-              <el-button size="small" @click="handleDeviceConfig(device.id)">
-                <el-icon><Setting /></el-icon>
-                配置
-              </el-button>
-              <el-button size="small" type="danger" @click="handleRemoveDevice(device.id)">
-                <el-icon><Delete /></el-icon>
-                移除
-              </el-button>
+            <div class="device-status">
+              <span :class="['status-dot', isDeviceOnline(device.last_active_at) ? 'online' : 'offline']"></span>
+              <span class="status-text">{{ isDeviceOnline(device.last_active_at) ? '在线' : '离线' }}</span>
             </div>
           </div>
-        </el-col>
-      </el-row>
+          
+          <div class="device-meta">
+            <div class="meta-row">
+              <span class="meta-label">设备类型</span>
+              <span class="meta-value">ESP32设备</span>
+            </div>
+            <div class="meta-row">
+              <span class="meta-label">激活状态</span>
+              <span class="meta-value">
+                <el-tag :type="device.activated ? 'success' : 'warning'" size="small">
+                  {{ device.activated ? '已激活' : '未激活' }}
+                </el-tag>
+              </span>
+            </div>
+            <div class="meta-row">
+              <span class="meta-label">最后活跃</span>
+              <span class="meta-value">{{ formatDate(device.last_active_at) }}</span>
+            </div>
+            <div class="meta-row">
+              <span class="meta-label">创建时间</span>
+              <span class="meta-value">{{ formatDate(device.created_at) }}</span>
+            </div>
+          </div>
+          
+          <div class="device-actions">
+            <el-button size="small" @click="handleDeviceRole(device.id)">
+              <el-icon><User /></el-icon>
+              角色
+            </el-button>
+            <el-button size="small" @click="handleDeviceConfig(device.id)">
+              <el-icon><Setting /></el-icon>
+              配置
+            </el-button>
+            <el-button size="small" type="danger" @click="handleRemoveDevice(device.id)">
+              <el-icon><Delete /></el-icon>
+              移除
+            </el-button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- 添加设备弹窗 -->
@@ -129,6 +131,97 @@
         </div>
       </template>
     </el-dialog>
+
+    <!-- 设备角色配置弹窗 -->
+    <el-dialog
+      v-model="showRoleConfigDialog"
+      title="设备角色配置"
+      width="700px"
+      @close="handleCloseRoleConfig"
+    >
+      <div v-loading="roleConfigLoading">
+        <div class="role-config-content">
+          <el-alert
+            title="配置说明"
+            type="info"
+            :closable="false"
+            style="margin-bottom: 16px"
+          >
+            设备关联角色后，将使用角色的配置（Prompt、LLM、TTS）覆盖智能体的配置。如需使用智能体配置，请取消关联角色。
+          </el-alert>
+
+          <el-form label-width="120px">
+            <el-form-item label="当前角色">
+              <div v-if="currentDevice.role_id">
+                <el-tag type="success" size="large">已关联角色</el-tag>
+                <div class="current-role-info">
+                  <p><strong>角色ID:</strong> {{ currentDevice.role_id }}</p>
+                </div>
+              </div>
+              <el-tag v-else type="info" size="large">未关联角色（使用智能体配置）</el-tag>
+            </el-form-item>
+
+            <el-form-item label="选择角色">
+              <el-select
+                v-model="selectedRoleId"
+                placeholder="选择角色（可选）"
+                style="width: 100%"
+                clearable
+                filterable
+                @change="handleRoleSelect"
+              >
+                <el-option
+                  v-for="role in availableRoles"
+                  :key="role.id"
+                  :label="role.name"
+                  :value="role.id"
+                >
+                  <div class="role-option-item">
+                    <div class="role-option-main">
+                      <span>{{ role.name }}</span>
+                      <el-tag v-if="role.role_type === 'global'" size="small" type="success">全局</el-tag>
+                    </div>
+                    <el-tag size="small" type="info">LLM: {{ role.llm_config_id || '默认' }}</el-tag>
+                  </div>
+                </el-option>
+              </el-select>
+              <div class="form-help">
+                选择角色后，设备将使用角色的配置。留空则取消角色关联。
+              </div>
+            </el-form-item>
+
+            <el-form-item label="角色详情" v-if="selectedRole">
+              <el-card class="role-preview-card">
+                <div class="role-preview-content">
+                  <p><strong>名称:</strong> {{ selectedRole.name }}</p>
+                  <p v-if="selectedRole.description"><strong>描述:</strong> {{ selectedRole.description }}</p>
+                  <el-divider />
+                  <p><strong>Prompt:</strong></p>
+                  <p class="prompt-preview">{{ selectedRole.prompt.substring(0, 200) }}{{ selectedRole.prompt.length > 200 ? '...' : '' }}</p>
+                  <div class="role-configs-preview">
+                    <el-tag size="small">LLM: {{ selectedRole.llm_config_id || '默认' }}</el-tag>
+                    <el-tag size="small">TTS: {{ selectedRole.tts_config_id || '默认' }}</el-tag>
+                    <el-tag v-if="selectedRole.voice" size="small">音色: {{ selectedRole.voice }}</el-tag>
+                  </div>
+                </div>
+              </el-card>
+            </el-form-item>
+          </el-form>
+        </div>
+      </div>
+
+      <template #footer>
+        <el-button @click="handleCloseRoleConfig">取消</el-button>
+        <el-button
+          type="primary"
+          @click="handleApplyRole"
+          :loading="roleConfigLoading"
+          :disabled="!selectedRoleId && !currentDevice.role_id"
+        >
+          {{ selectedRoleId ? '应用角色' : '取消角色' }}
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -136,7 +229,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowLeft, Plus, Monitor, Setting, Delete } from '@element-plus/icons-vue'
+import { ArrowLeft, Plus, Monitor, Setting, Delete, User } from '@element-plus/icons-vue'
 import api from '../../utils/api'
 
 const router = useRouter()
@@ -147,6 +240,15 @@ const devices = ref([])
 const showAddDeviceDialog = ref(false)
 const addingDevice = ref(false)
 const deviceFormRef = ref()
+
+// 设备角色配置相关
+const showRoleConfigDialog = ref(false)
+const roleConfigLoading = ref(false)
+const currentDevice = ref({})
+const selectedRoleId = ref(null)
+const selectedRole = ref(null)
+const availableRoles = ref([])
+const isRoleActive = (role) => role?.status === 'active' || !role?.status
 
 const deviceForm = reactive({
   code: ''
@@ -204,6 +306,84 @@ const handleDeviceConfig = (deviceId) => {
   ElMessage.info('设备配置功能开发中')
 }
 
+// 加载角色列表
+const loadRoles = async () => {
+  try {
+    const response = await api.get('/user/roles')
+    const globalRoles = response.data.data?.global_roles || []
+    const userRoles = response.data.data?.user_roles || []
+    availableRoles.value = [...globalRoles, ...userRoles].filter(isRoleActive)
+  } catch (error) {
+    console.error('加载角色列表失败:', error)
+  }
+}
+
+// 打开设备角色配置弹窗
+const handleDeviceRole = async (deviceId) => {
+  const device = devices.value.find(d => d.id === deviceId)
+  if (!device) return
+
+  currentDevice.value = { ...device }
+  selectedRoleId.value = device.role_id || null
+  selectedRole.value = null
+
+  // 加载角色列表（如果还没有加载）
+  if (availableRoles.value.length === 0) {
+    await loadRoles()
+  }
+
+  // 如果已有关联角色，查找角色信息
+  if (device.role_id) {
+    const role = availableRoles.value.find(r => r.id === device.role_id)
+    if (role) {
+      selectedRole.value = role
+    }
+  }
+
+  showRoleConfigDialog.value = true
+}
+
+// 处理角色选择变化
+const handleRoleSelect = (roleId) => {
+  if (!roleId) {
+    selectedRole.value = null
+    return
+  }
+  const role = availableRoles.value.find(r => r.id === roleId)
+  if (role) {
+    selectedRole.value = role
+  }
+}
+
+// 应用角色到设备
+const handleApplyRole = async () => {
+  if (!currentDevice.value.id) return
+
+  roleConfigLoading.value = true
+  try {
+    const data = {
+      role_id: selectedRoleId.value || null
+    }
+
+    await api.post(`/devices/${currentDevice.value.id}/apply-role`, data)
+    ElMessage.success(selectedRoleId.value ? '角色已应用到设备' : '已取消设备角色')
+    showRoleConfigDialog.value = false
+    await loadDevices()
+  } catch (error) {
+    ElMessage.error('操作失败: ' + (error.response?.data?.error || error.message))
+  } finally {
+    roleConfigLoading.value = false
+  }
+}
+
+// 关闭角色配置弹窗
+const handleCloseRoleConfig = () => {
+  showRoleConfigDialog.value = false
+  currentDevice.value = {}
+  selectedRoleId.value = null
+  selectedRole.value = null
+}
+
 const handleRemoveDevice = async (deviceId) => {
   try {
     await ElMessageBox.confirm(
@@ -248,6 +428,7 @@ const isDeviceOnline = (lastActiveAt) => {
 
 onMounted(() => {
   loadDevices()
+  loadRoles()
 })
 </script>
 
@@ -310,6 +491,14 @@ onMounted(() => {
 
 .devices-grid {
   margin-top: 20px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 440px));
+  gap: 20px 12px;
+  justify-content: flex-start;
+}
+
+.device-item {
+  min-width: 0;
 }
 
 .device-card {
@@ -321,6 +510,9 @@ onMounted(() => {
   height: 100%;
   display: flex;
   flex-direction: column;
+  width: 100%;
+  max-width: 440px;
+  min-width: 0;
 }
 
 .device-card:hover {
@@ -424,13 +616,22 @@ onMounted(() => {
 }
 
 .device-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   margin-top: auto;
 }
 
 .device-actions .el-button {
-  flex: 1;
+  min-width: 0;
+  width: 100%;
+  padding: 0 8px;
+}
+
+.device-actions :deep(.el-button > span) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .device-dialog-content {
@@ -459,6 +660,71 @@ onMounted(() => {
   min-width: 80px;
 }
 
+/* 设备角色配置相关样式 */
+.role-config-content {
+  padding: 20px 0;
+}
+
+.current-role-info {
+  margin-bottom: 16px;
+}
+
+.current-role-info p {
+  margin: 4px 0;
+  color: #666;
+}
+
+.role-option-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin-bottom: 8px;
+}
+
+.role-option-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.role-preview-card {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+}
+
+.role-preview-content {
+  font-size: 14px;
+}
+
+.role-preview-content p {
+  margin: 8px 0;
+}
+
+.role-preview-content strong {
+  color: #333;
+  margin-right: 8px;
+}
+
+.role-configs-preview {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.prompt-preview {
+  background: #f5f5f5;
+  padding: 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #666;
+  line-height: 1.6;
+}
+
 @media (max-width: 768px) {
   .page-header {
     flex-direction: column;
@@ -473,9 +739,28 @@ onMounted(() => {
   .header-right {
     align-self: flex-end;
   }
-  
-  .devices-grid .el-col {
-    margin-bottom: 16px;
+
+  .devices-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .device-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .device-actions .el-button:last-child {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 560px) {
+  .devices-grid {
+    gap: 10px;
+  }
+
+  .device-actions {
+    grid-template-columns: 1fr;
   }
 }
 </style>

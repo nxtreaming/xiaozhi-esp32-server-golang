@@ -30,56 +30,53 @@
     </div>
 
     <div v-else class="agents-grid">
-      <el-row :gutter="24">
-        <el-col :xs="24" :sm="12" :md="8" :lg="6" v-for="agent in agents" :key="agent.id">
-          <div class="agent-card">
-            <div class="agent-header">
-              <div class="agent-avatar">
-                <el-icon size="28"><Monitor /></el-icon>
-              </div>
-              <div class="agent-info">
-                <h3 class="agent-name">{{ agent.name }}</h3>
-                <p class="agent-desc">智能助手</p>
-              </div>
-              <div class="agent-status">
-                <span class="status-dot active"></span>
-                <span class="status-text">在线</span>
-              </div>
+      <div v-for="agent in agents" :key="agent.id" class="agent-item">
+        <div class="agent-card">
+          <div class="agent-header">
+            <div class="agent-avatar">
+              <el-icon size="28"><Monitor /></el-icon>
             </div>
-            
-            <div class="agent-meta">
-              <div class="meta-row">
-                <span class="meta-label">TTS配置</span>
-                <span class="meta-value">{{ getVoiceType(agent) }}</span>
-              </div>
-              <div class="meta-row">
-                <span class="meta-label">语言模型</span>
-                <span class="meta-value">{{ getLLMProvider(agent) }}</span>
-              </div>
-              <div class="meta-row">
-                <span class="meta-label">最近对话</span>
-                <span class="meta-value">{{ formatDate(agent.updated_at) }}</span>
-              </div>
+            <div class="agent-info">
+              <h3 class="agent-name">{{ agent.name }}</h3>
+              <p class="agent-desc">智能助手</p>
             </div>
-            
-            <div class="agent-actions">
-              <el-button type="primary" size="small" @click="editAgent(agent.id)">
-                <el-icon><Setting /></el-icon>
-                配置
-              </el-button>
-              <el-button size="small" @click="handleChatHistory(agent.id)">
-                <el-icon><ChatDotRound /></el-icon>
-                对话
-              </el-button>
-              <el-button size="small" @click="handleManageDevices(agent.id)">
-                <el-icon><Monitor /></el-icon>
-                设备
-              </el-button>
-
+            <div class="agent-status">
+              <span class="status-dot active"></span>
+              <span class="status-text">在线</span>
             </div>
           </div>
-        </el-col>
-      </el-row>
+          
+          <div class="agent-meta">
+            <div class="meta-row">
+              <span class="meta-label">TTS配置</span>
+              <span class="meta-value">{{ getVoiceType(agent) }}</span>
+            </div>
+            <div class="meta-row">
+              <span class="meta-label">语言模型</span>
+              <span class="meta-value">{{ getLLMProvider(agent) }}</span>
+            </div>
+            <div class="meta-row">
+              <span class="meta-label">最近对话</span>
+              <span class="meta-value">{{ formatDate(agent.updated_at) }}</span>
+            </div>
+          </div>
+          
+          <div class="agent-actions">
+            <el-button type="primary" size="small" @click="editAgent(agent.id)">
+              <el-icon><Setting /></el-icon>
+              配置
+            </el-button>
+            <el-button size="small" @click="handleChatHistory(agent.id)">
+              <el-icon><ChatDotRound /></el-icon>
+              对话
+            </el-button>
+            <el-button size="small" @click="handleManageDevices(agent.id)">
+              <el-icon><Monitor /></el-icon>
+              设备
+            </el-button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- 添加设备弹窗 -->
@@ -571,6 +568,14 @@ onMounted(() => {
 
 .agents-grid {
   padding: 0 20px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 420px));
+  gap: 20px 12px;
+  justify-content: flex-start;
+}
+
+.agent-item {
+  min-width: 0;
 }
 
 .agent-card {
@@ -578,12 +583,14 @@ onMounted(() => {
   border-radius: 12px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
   border: 1px solid #f0f0f0;
-  margin-bottom: 24px;
   padding: 20px;
   transition: all 0.3s ease;
   height: 100%;
   display: flex;
   flex-direction: column;
+  width: 100%;
+  max-width: 420px;
+  min-width: 0;
 }
 
 .agent-card:hover {
@@ -690,21 +697,30 @@ onMounted(() => {
 }
 
 .agent-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   padding-top: 16px;
   border-top: 1px solid #f5f5f5;
 }
 
 .agent-actions .el-button {
-  flex: 1;
   border-radius: 6px;
   font-size: 12px;
   height: 32px;
+  min-width: 0;
+  width: 100%;
+  padding: 0 8px;
 }
 
 .agent-actions .el-button .el-icon {
   margin-right: 4px;
+}
+
+.agent-actions :deep(.el-button > span) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .agent-actions .el-button--primary {
@@ -861,5 +877,27 @@ onMounted(() => {
 
 .tool-tag:hover .tool-info-icon {
   opacity: 1;
+}
+
+@media (max-width: 900px) {
+  .agent-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .agent-actions .el-button:last-child {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 560px) {
+  .agents-grid {
+    padding: 0 12px;
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .agent-actions {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

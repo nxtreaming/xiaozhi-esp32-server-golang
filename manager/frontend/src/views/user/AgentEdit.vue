@@ -17,6 +17,39 @@
 
     <div class="config-content">
       <div class="config-form">
+        <!-- 角色快捷选择 -->
+        <div class="form-section">
+          <h3 class="section-title">
+            快速配置
+            <el-tooltip content="点击角色可快速应用其配置到智能体" placement="top">
+              <el-icon class="help-icon"><QuestionFilled /></el-icon>
+            </el-tooltip>
+          </h3>
+
+          <div class="role-selector" v-loading="rolesLoading">
+            <div v-if="allRoles.length > 0" class="role-inline-line">
+              <button
+                v-for="role in allRoles"
+                :key="role.id"
+                type="button"
+                class="role-inline-item"
+                :class="{ active: selectedRoleId === role.id }"
+                @click="applyRoleConfig(role)"
+              >
+                <span class="role-inline-name">{{ role.name }}</span>
+                <span class="role-inline-type" :class="role.role_type === 'global' ? 'global' : 'user'">
+                  {{ role.role_type === 'global' ? '全局' : '我的' }}
+                </span>
+              </button>
+            </div>
+            <el-empty v-else description="暂无可用角色" :image-size="56" />
+
+            <div class="form-help">
+              角色名称已平铺展示，点击任意角色会立即填充 Prompt、LLM、TTS 和音色配置（不会自动保存）
+            </div>
+          </div>
+        </div>
+
         <!-- 基础信息 -->
         <div class="form-section">
           <h3 class="section-title">基础信息</h3>
@@ -244,15 +277,29 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ArrowLeft, VideoPlay, Refresh, InfoFilled } from '@element-plus/icons-vue'
+import { ArrowLeft, VideoPlay, Refresh, InfoFilled, QuestionFilled } from '@element-plus/icons-vue'
 import api from '@/utils/api'
 
 const route = useRoute()
 const router = useRouter()
 const saving = ref(false)
+const applyingRoleConfig = ref(false)
+
+// 角色相关数据
+const globalRoles = ref([])
+const userRoles = ref([])
+const selectedRoleId = ref(null)
+const rolesLoading = ref(false)
+
+const isRoleEnabled = (role) => role?.status === "active" || !role?.status
+
+// 计算所有角色列表（用于选择器）
+const allRoles = computed(() => {
+  return [...globalRoles.value, ...userRoles.value].filter(isRoleEnabled)
+})
 
 // 表单数据
 const form = reactive({
@@ -263,9 +310,6 @@ const form = reactive({
   voice: null,
   asr_speed: 'normal'
 })
-
-// 角色模板数据
-const roleTemplates = ref([])
 
 // LLM配置数据
 const llmConfigs = ref([])
@@ -396,18 +440,71 @@ const loadAgent = async () => {
   }
 }
 
-// 加载角色模板
-const loadRoleTemplates = async () => {
+// 加载角色列表（全局+用户角色）
+const loadRoles = async () => {
+  rolesLoading.value = true
   try {
-    const response = await api.get('/user/role-templates')
-    roleTemplates.value = response.data.data || []
+    const response = await api.get('/user/roles')
+    globalRoles.value = response.data.data?.global_roles || []
+    userRoles.value = response.data.data?.user_roles || []
   } catch (error) {
-    console.error('加载角色模板失败:', error)
+    console.error('加载角色列表失败:', error)
+  } finally {
+    rolesLoading.value = false
+  }
+}
+
+// 应用角色配置到智能体表单
+const applyRoleConfig = async (role) => {
+  if (!role) return
+  applyingRoleConfig.value = true
+  try {
+    selectedRoleId.value = role.id
+
+    // 填充配置到表单
+    form.custom_prompt = role.prompt || ''
+
+    // LLM 配置
+    if (role.llm_config_id) {
+      const llmConfig = llmConfigs.value.find(c => c.config_id === role.llm_config_id)
+      if (llmConfig) {
+        form.llm_config_id = role.llm_config_id
+        ElMessage.success(`已应用 LLM 配置: ${llmConfig.name}`)
+      } else {
+        ElMessage.warning('角色的 LLM 配置不存在')
+      }
+    }
+
+    // TTS 配置
+    if (role.tts_config_id) {
+      const ttsConfig = ttsConfigs.value.find(c => c.config_id === role.tts_config_id)
+      if (ttsConfig) {
+        form.tts_config_id = role.tts_config_id
+      } else {
+        ElMessage.warning('角色的 TTS 配置不存在')
+        form.tts_config_id = null
+      }
+    } else {
+      form.tts_config_id = null
+    }
+
+    // 按 TTS 配置刷新音色列表，再填充角色音色
+    await handleTtsConfigChange()
+    form.voice = role.voice || null
+
+    ElMessage.success('角色配置已应用，可继续修改并保存')
+  } finally {
+    applyingRoleConfig.value = false
   }
 }
 
 // 保存智能体
 const handleSave = async () => {
+  if (applyingRoleConfig.value) {
+    ElMessage.info('当前仅填充角色配置，不会自动保存，请点击“保存配置”提交')
+    return
+  }
+
   if (!form.name.trim()) {
     ElMessage.error('请输入智能体昵称')
     return
@@ -625,10 +722,11 @@ const loadVoices = async (provider) => {
 }
 
 onMounted(async () => {
-  // 先加载配置数据
+  // 先加载配置数据和角色列表
   await Promise.all([
     loadLlmConfigs(),
-    loadTtsConfigs()
+    loadTtsConfigs(),
+    loadRoles()
   ])
   
   if (route.params.id) {
@@ -700,6 +798,88 @@ onMounted(async () => {
   margin-bottom: 40px;
   padding-bottom: 32px;
   border-bottom: 1px solid #e5e7eb;
+}
+
+/* 角色选择器相关样式 */
+.help-icon {
+  margin-left: 8px;
+  font-size: 16px;
+  color: #909399;
+  cursor: help;
+}
+
+.role-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.role-inline-line {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 4px 2px 6px;
+}
+
+.role-inline-line::-webkit-scrollbar {
+  height: 6px;
+}
+
+.role-inline-line::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 999px;
+}
+
+.role-inline-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+  padding: 8px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 999px;
+  background: #fff;
+  color: #374151;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.role-inline-item:hover {
+  border-color: #93c5fd;
+  background: #f8fbff;
+}
+
+.role-inline-item.active {
+  border-color: #3b82f6;
+  background: #eff6ff;
+  color: #1d4ed8;
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.15);
+}
+
+.role-inline-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.role-inline-type {
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+
+.role-inline-type.global {
+  color: #166534;
+  background: #dcfce7;
+  border-color: #86efac;
+}
+
+.role-inline-type.user {
+  color: #7c2d12;
+  background: #ffedd5;
+  border-color: #fdba74;
 }
 
 .form-section:last-child {

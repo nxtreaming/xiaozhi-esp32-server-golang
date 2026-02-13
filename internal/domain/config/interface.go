@@ -19,6 +19,12 @@ type UserConfigProvider interface {
 	// GetUserConfig 获取用户配置（兼容原有接口）
 	GetUserConfig(ctx context.Context, userID string) (types.UConfig, error)
 
+	// SwitchDeviceRoleByName 按角色名（支持模糊匹配）切换设备角色
+	SwitchDeviceRoleByName(ctx context.Context, deviceID string, roleName string) (string, error)
+
+	// RestoreDeviceDefaultRole 恢复设备默认角色（清空设备绑定角色）
+	RestoreDeviceDefaultRole(ctx context.Context, deviceID string) error
+
 	// 获取 mqtt, mqtt_server, udp, ota, vision配置
 	GetSystemConfig(ctx context.Context) (string, error)
 

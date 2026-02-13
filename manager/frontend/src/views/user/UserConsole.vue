@@ -912,7 +912,7 @@ onMounted(() => {
 .devices-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: 16px;
+  gap: 16px 12px;
 }
 
 .device-item {
@@ -1049,7 +1049,7 @@ onMounted(() => {
 .agents-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 16px;
+  gap: 16px 12px;
 }
 
 .agent-item {
@@ -1337,7 +1337,7 @@ onMounted(() => {
   
   .devices-grid {
     grid-template-columns: 1fr;
-    gap: 12px;
+    gap: 10px;
   }
   
   .agents-grid {
