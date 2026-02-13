@@ -43,10 +43,13 @@ type EinoConfig struct {
 
 // 连接池配置
 const (
-	maxIdleConns        = 100
-	maxIdleConnsPerHost = 10
-	idleConnTimeout     = 90 * time.Second
-	requestTimeout      = 30 * time.Second
+	maxIdleConns          = 200
+	maxIdleConnsPerHost   = 50
+	idleConnTimeout       = 90 * time.Second
+	dialTimeout           = 30 * time.Second
+	keepAliveTimeout      = 30 * time.Second
+	tlsHandshakeTimeout   = 10 * time.Second
+	responseHeaderTimeout = 60 * time.Second
 )
 
 // 全局HTTP客户端，用于所有OpenAI请求
@@ -61,20 +64,22 @@ func getHTTPClient() *http.Client {
 		transport := &http.Transport{
 			Proxy: http.ProxyFromEnvironment,
 			DialContext: (&net.Dialer{
-				Timeout:   30 * time.Second,
-				KeepAlive: 30 * time.Second,
+				Timeout:   dialTimeout,
+				KeepAlive: keepAliveTimeout,
 			}).DialContext,
-			MaxIdleConns:        maxIdleConns,
-			MaxIdleConnsPerHost: maxIdleConnsPerHost,
-			IdleConnTimeout:     idleConnTimeout,
-			TLSHandshakeTimeout: 10 * time.Second,
-			//ExpectContinueTimeout: 1 * time.Second,
-			DisableKeepAlives: false,
+			MaxIdleConns:          maxIdleConns,
+			MaxIdleConnsPerHost:   maxIdleConnsPerHost,
+			IdleConnTimeout:       idleConnTimeout,
+			TLSHandshakeTimeout:   tlsHandshakeTimeout,
+			ResponseHeaderTimeout: responseHeaderTimeout,
+			ExpectContinueTimeout: 1 * time.Second,
+			DisableKeepAlives:     false,
 		}
 
 		httpClient = &http.Client{
 			Transport: transport,
-			Timeout:   requestTimeout,
+			// 流式输出场景不要用 http.Client.Timeout 截断整个连接，改由 ctx 控制请求生命周期。
+			Timeout: 0,
 		}
 	})
 
@@ -153,8 +158,9 @@ func createOpenAIChatModel(config map[string]interface{}) (model.ToolCallingChat
 
 	// 创建OpenAI ChatModel配置
 	openaiConfig := &openai.ChatModelConfig{
-		Model:  modelName,
-		APIKey: apiKey,
+		Model:      modelName,
+		APIKey:     apiKey,
+		HTTPClient: getHTTPClient(),
 	}
 
 	if baseURL != "" {
