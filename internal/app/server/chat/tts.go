@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 	. "xiaozhi-esp32-server-golang/internal/data/client"
 	llm_common "xiaozhi-esp32-server-golang/internal/domain/llm/common"
@@ -24,13 +25,14 @@ const (
 
 // AudioQueueElem 会话级音频队列元素，兼容 []byte 与 sentence_start/sentence_end、tts_start/tts_stop
 type AudioQueueElem struct {
-	Kind    int    // AudioQueueKindFrame / SentenceStart / SentenceEnd / TtsStart / TtsStop
-	Data    []byte // Kind==Frame 时使用，拷贝后入队
-	Text    string // SentenceStart/SentenceEnd 时使用
-	Err     error  // SentenceEnd 时可选，表示本段错误
-	IsStart bool   // SentenceStart 时：是否为首包（用于统计）
-	OnStart func()
-	OnEnd   func(error)
+	Kind       int    // AudioQueueKindFrame / SentenceStart / SentenceEnd / TtsStart / TtsStop
+	Data       []byte // Kind==Frame 时使用，拷贝后入队
+	Text       string // SentenceStart/SentenceEnd 时使用
+	Err        error  // SentenceEnd 时可选，表示本段错误
+	IsStart    bool   // SentenceStart 时：是否为首包（用于统计）
+	Generation uint64 // 代际标识，打断后旧代际元素将被丢弃
+	OnStart    func()
+	OnEnd      func(error)
 }
 
 // SessionAudioQueueCap 会话级音频队列容量，足够大以吸收预取并避免阻塞
@@ -40,6 +42,7 @@ type TTSQueueItem struct {
 	ctx         context.Context
 	llmResponse llm_common.LLMResponseStruct        // 单条模式使用
 	StreamChan  <-chan llm_common.LLMResponseStruct // 流式模式：非 nil 时优先从此 channel 读
+	generation  uint64
 	onStartFunc func()
 	onEndFunc   func(err error)
 }
@@ -56,6 +59,7 @@ type TTSManager struct {
 	ttsQueue          *util.Queue[TTSQueueItem]
 	sessionAudioQueue chan AudioQueueElem // 会话级全局音频队列，兼容帧与控制消息
 	interruptCh       chan struct{}       // 打断信号：收到后 runSenderLoop 清空 sessionAudioQueue 并继续
+	audioGeneration   atomic.Uint64       // 会话级音频代际：打断时递增，旧代际元素会被发送协程丢弃
 
 	// 聊天历史音频缓存：持续累积多段TTS音频（Opus帧数组）
 	audioHistoryBuffer [][]byte
@@ -74,6 +78,7 @@ func NewTTSManager(clientState *ClientState, serverTransport *ServerTransport, o
 	for _, opt := range opts {
 		opt(t)
 	}
+	t.audioGeneration.Store(1)
 	return t
 }
 
@@ -104,6 +109,9 @@ func (t *TTSManager) runSenderLoop(ctx context.Context) {
 		case elem, ok := <-t.sessionAudioQueue:
 			if !ok {
 				return
+			}
+			if elem.Generation != t.currentAudioGeneration() {
+				continue
 			}
 			switch elem.Kind {
 			case AudioQueueKindSentenceStart:
@@ -208,8 +216,31 @@ func (t *TTSManager) ClearSessionAudioQueue() {
 	t.drainSessionAudioQueue()
 }
 
+func (t *TTSManager) currentAudioGeneration() uint64 {
+	return t.audioGeneration.Load()
+}
+
+func (t *TTSManager) nextAudioGeneration() uint64 {
+	return t.audioGeneration.Add(1)
+}
+
+func (t *TTSManager) enqueueSessionElem(ctx context.Context, generation uint64, elem AudioQueueElem) bool {
+	elem.Generation = generation
+	if ctx == nil {
+		t.sessionAudioQueue <- elem
+		return true
+	}
+	select {
+	case <-ctx.Done():
+		return false
+	case t.sessionAudioQueue <- elem:
+		return true
+	}
+}
+
 // InterruptAndClearQueue 触发打断：通知 runSenderLoop 清空 sessionAudioQueue 后继续运行（非阻塞）
 func (t *TTSManager) InterruptAndClearQueue() {
+	t.nextAudioGeneration()
 	select {
 	case t.interruptCh <- struct{}{}:
 	default:
@@ -218,20 +249,12 @@ func (t *TTSManager) InterruptAndClearQueue() {
 
 // EnqueueTtsStart 向会话级音频队列投递 TtsStart，由 runSenderLoop 统一发送；队列满时阻塞直到入队或 ctx.Done
 func (t *TTSManager) EnqueueTtsStart(ctx context.Context) {
-	select {
-	case t.sessionAudioQueue <- AudioQueueElem{Kind: AudioQueueKindTtsStart}:
-	case <-ctx.Done():
-		return
-	}
+	t.enqueueSessionElem(ctx, t.currentAudioGeneration(), AudioQueueElem{Kind: AudioQueueKindTtsStart})
 }
 
 // EnqueueTtsStop 向会话级音频队列投递 TtsStop，由 runSenderLoop 统一发送；队列满时阻塞直到入队或 ctx.Done
 func (t *TTSManager) EnqueueTtsStop(ctx context.Context) {
-	select {
-	case t.sessionAudioQueue <- AudioQueueElem{Kind: AudioQueueKindTtsStop}:
-	case <-ctx.Done():
-		return
-	}
+	t.enqueueSessionElem(ctx, t.currentAudioGeneration(), AudioQueueElem{Kind: AudioQueueKindTtsStop})
 }
 
 func (t *TTSManager) processTTSQueue(ctx context.Context) {
@@ -253,7 +276,7 @@ func (t *TTSManager) processTTSQueue(ctx context.Context) {
 
 		// 非流式：由 handleTts 生成并推送 SentenceStart → Frame… → SentenceEnd
 		log.Debugf("processTTSQueue start, text: %s", item.llmResponse.Text)
-		t.handleTts(item.ctx, item.llmResponse, item.onStartFunc, item.onEndFunc)
+		t.handleTts(item.ctx, item.generation, item.llmResponse, item.onStartFunc, item.onEndFunc)
 		log.Debugf("processTTSQueue end, text: %s (pushed)", item.llmResponse.Text)
 	}
 }
@@ -263,7 +286,7 @@ func (t *TTSManager) ClearTTSQueue() {
 }
 
 // handleTts 单条 TTS：生成并向 sessionAudioQueue 推送 SentenceStart → Frame… → SentenceEnd
-func (t *TTSManager) handleTts(ctx context.Context, llmResponse llm_common.LLMResponseStruct, onStartFunc func(), onEndFunc func(error)) {
+func (t *TTSManager) handleTts(ctx context.Context, generation uint64, llmResponse llm_common.LLMResponseStruct, onStartFunc func(), onEndFunc func(error)) {
 	if llmResponse.Text == "" {
 		if onEndFunc != nil {
 			onEndFunc(nil)
@@ -279,29 +302,64 @@ func (t *TTSManager) handleTts(ctx context.Context, llmResponse llm_common.LLMRe
 		return
 	}
 	if outChan == nil {
+		if release != nil {
+			release()
+		}
 		if onEndFunc != nil {
 			onEndFunc(nil)
 		}
 		return
 	}
-	t.sessionAudioQueue <- AudioQueueElem{
+	if !t.enqueueSessionElem(ctx, generation, AudioQueueElem{
 		Kind:    AudioQueueKindSentenceStart,
 		Text:    llmResponse.Text,
 		IsStart: llmResponse.IsStart,
 		OnStart: onStartFunc,
+	}) {
+		if release != nil {
+			release()
+		}
+		if onEndFunc != nil {
+			onEndFunc(ctx.Err())
+		}
+		return
 	}
-	for frame := range outChan {
-		frameCopy := make([]byte, len(frame))
-		copy(frameCopy, frame)
-		t.sessionAudioQueue <- AudioQueueElem{Kind: AudioQueueKindFrame, Data: frameCopy}
-	}
-	if release != nil {
-		release()
-	}
-	t.sessionAudioQueue <- AudioQueueElem{
-		Kind:  AudioQueueKindSentenceEnd,
-		Text:  llmResponse.Text,
-		OnEnd: onEndFunc,
+	for {
+		select {
+		case <-ctx.Done():
+			if release != nil {
+				release()
+			}
+			if onEndFunc != nil {
+				onEndFunc(ctx.Err())
+			}
+			return
+		case frame, ok := <-outChan:
+			if !ok {
+				if release != nil {
+					release()
+				}
+				if !t.enqueueSessionElem(ctx, generation, AudioQueueElem{
+					Kind:  AudioQueueKindSentenceEnd,
+					Text:  llmResponse.Text,
+					OnEnd: onEndFunc,
+				}) && onEndFunc != nil {
+					onEndFunc(ctx.Err())
+				}
+				return
+			}
+			frameCopy := make([]byte, len(frame))
+			copy(frameCopy, frame)
+			if !t.enqueueSessionElem(ctx, generation, AudioQueueElem{Kind: AudioQueueKindFrame, Data: frameCopy}) {
+				if release != nil {
+					release()
+				}
+				if onEndFunc != nil {
+					onEndFunc(ctx.Err())
+				}
+				return
+			}
+		}
 	}
 }
 
@@ -311,7 +369,7 @@ func (t *TTSManager) handleTextResponse(ctx context.Context, llmResponse llm_com
 		return nil
 	}
 
-	ttsQueueItem := TTSQueueItem{ctx: ctx, llmResponse: llmResponse}
+	ttsQueueItem := TTSQueueItem{ctx: ctx, llmResponse: llmResponse, generation: t.currentAudioGeneration()}
 	endChan := make(chan bool, 1)
 	ttsQueueItem.onEndFunc = func(err error) {
 		select {
@@ -432,22 +490,36 @@ func (t *TTSManager) handleStreamTts(item TTSQueueItem) {
 	for {
 		select {
 		case <-item.ctx.Done():
-			t.sessionAudioQueue <- AudioQueueElem{Kind: AudioQueueKindSentenceEnd, OnEnd: item.onEndFunc, Err: item.ctx.Err()}
+			if !t.enqueueSessionElem(item.ctx, item.generation, AudioQueueElem{Kind: AudioQueueKindSentenceEnd, OnEnd: item.onEndFunc, Err: item.ctx.Err()}) && item.onEndFunc != nil {
+				item.onEndFunc(item.ctx.Err())
+			}
 			return
 		case resp, ok := <-item.StreamChan:
 			if !ok {
-				t.sessionAudioQueue <- AudioQueueElem{Kind: AudioQueueKindSentenceEnd, OnEnd: item.onEndFunc}
+				if !t.enqueueSessionElem(item.ctx, item.generation, AudioQueueElem{Kind: AudioQueueKindSentenceEnd, OnEnd: item.onEndFunc}) && item.onEndFunc != nil {
+					item.onEndFunc(nil)
+				}
 				return
 			}
 			outChan, release, genErr := t.generateTtsOnly(item.ctx, resp)
 			if genErr != nil {
 				if firstSegment {
-					t.sessionAudioQueue <- AudioQueueElem{Kind: AudioQueueKindSentenceStart, OnStart: item.onStartFunc}
+					if !t.enqueueSessionElem(item.ctx, item.generation, AudioQueueElem{Kind: AudioQueueKindSentenceStart, OnStart: item.onStartFunc}) {
+						if item.onEndFunc != nil {
+							item.onEndFunc(item.ctx.Err())
+						}
+						return
+					}
 				}
-				t.sessionAudioQueue <- AudioQueueElem{Kind: AudioQueueKindSentenceEnd, OnEnd: item.onEndFunc, Err: genErr}
+				if !t.enqueueSessionElem(item.ctx, item.generation, AudioQueueElem{Kind: AudioQueueKindSentenceEnd, OnEnd: item.onEndFunc, Err: genErr}) && item.onEndFunc != nil {
+					item.onEndFunc(genErr)
+				}
 				return
 			}
 			if outChan == nil {
+				if release != nil {
+					release()
+				}
 				continue
 			}
 			startElem := AudioQueueElem{
@@ -459,16 +531,49 @@ func (t *TTSManager) handleStreamTts(item TTSQueueItem) {
 				startElem.OnStart = item.onStartFunc
 				firstSegment = false
 			}
-			t.sessionAudioQueue <- startElem
-			for frame := range outChan {
-				frameCopy := make([]byte, len(frame))
-				copy(frameCopy, frame)
-				t.sessionAudioQueue <- AudioQueueElem{Kind: AudioQueueKindFrame, Data: frameCopy}
+			if !t.enqueueSessionElem(item.ctx, item.generation, startElem) {
+				if release != nil {
+					release()
+				}
+				if item.onEndFunc != nil {
+					item.onEndFunc(item.ctx.Err())
+				}
+				return
 			}
-			if release != nil {
-				release()
+			for {
+				select {
+				case <-item.ctx.Done():
+					if release != nil {
+						release()
+					}
+					if item.onEndFunc != nil {
+						item.onEndFunc(item.ctx.Err())
+					}
+					return
+				case frame, ok := <-outChan:
+					if !ok {
+						if release != nil {
+							release()
+						}
+						if !t.enqueueSessionElem(item.ctx, item.generation, AudioQueueElem{Kind: AudioQueueKindSentenceEnd, Text: resp.Text}) && item.onEndFunc != nil {
+							item.onEndFunc(item.ctx.Err())
+						}
+						goto nextResp
+					}
+					frameCopy := make([]byte, len(frame))
+					copy(frameCopy, frame)
+					if !t.enqueueSessionElem(item.ctx, item.generation, AudioQueueElem{Kind: AudioQueueKindFrame, Data: frameCopy}) {
+						if release != nil {
+							release()
+						}
+						if item.onEndFunc != nil {
+							item.onEndFunc(item.ctx.Err())
+						}
+						return
+					}
+				}
 			}
-			t.sessionAudioQueue <- AudioQueueElem{Kind: AudioQueueKindSentenceEnd, Text: resp.Text}
+		nextResp:
 		}
 	}
 }

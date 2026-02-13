@@ -635,7 +635,7 @@ func (s *ChatSession) HandleWelcome() {
 	ctx := s.clientState.AfterAsrSessionCtx.Get(sessionCtx)
 
 	s.ttsManager.EnqueueTtsStart(s.clientState.Ctx)
-	s.ttsManager.handleTts(ctx, llm_common.LLMResponseStruct{Text: greetingText}, nil, nil)
+	s.ttsManager.handleTts(ctx, s.ttsManager.currentAudioGeneration(), llm_common.LLMResponseStruct{Text: greetingText}, nil, nil)
 	s.ttsManager.EnqueueTtsStop(s.clientState.Ctx)
 
 	s.clientState.IsWelcomeSpeaking = true
@@ -928,20 +928,20 @@ func (s *ChatSession) Close() {
 		}
 		log.Debugf("ChatSession.Close() 开始清理会话资源, 设备 %s", deviceID)
 
-		// 停止说话和清理音频相关资源
-		s.StopSpeaking(true)
+		// 取消会话级别的上下文
+		if s.cancel != nil {
+			s.cancel()
+		}
 
 		// 清理聊天文本队列
 		s.ClearChatTextQueue()
 
+		// 停止说话和清理音频相关资源
+		s.StopSpeaking(true)
+
 		// 关闭服务端传输
 		if s.serverTransport != nil {
 			s.serverTransport.Close()
-		}
-
-		// 取消会话级别的上下文
-		if s.cancel != nil {
-			s.cancel()
 		}
 
 		if s.speakerManager != nil {

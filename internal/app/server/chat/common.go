@@ -1,12 +1,12 @@
 package chat
 
 func (s *ChatSession) StopSpeaking(isSendTtsStop bool) {
+	s.clientState.SessionCtx.Cancel()
+
 	s.ClearChatTextQueue()
 	s.llmManager.ClearLLMResponseQueue()
 	s.ttsManager.ClearTTSQueue()
 	s.ttsManager.InterruptAndClearQueue()
-
-	s.clientState.SessionCtx.Cancel()
 
 	if isSendTtsStop {
 		s.serverTransport.SendTtsStop()
