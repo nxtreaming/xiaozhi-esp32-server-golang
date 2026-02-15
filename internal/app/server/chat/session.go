@@ -559,6 +559,10 @@ func (s *ChatSession) HandleListenMessage(msg *ClientMessage) error {
 }
 
 func (s *ChatSession) HandleListenDetect(msg *ClientMessage) error {
+	if s.clientState.Status == ClientStatusListening {
+		log.Debugf("设备 %s 正在监听, 跳过唤醒词检测", msg.DeviceID)
+		return nil
+	}
 	// 唤醒词检测
 	s.StopSpeaking(false)
 
