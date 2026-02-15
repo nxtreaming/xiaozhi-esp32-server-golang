@@ -238,6 +238,7 @@ func (p *DoubaoWSProvider) TextToSpeechStream(ctx context.Context, text string, 
 			resp, err := parseResponse(message)
 			if err != nil {
 				log.Errorf("解析响应失败: %v", err)
+				p.clearConnection()
 				return
 			}
 
