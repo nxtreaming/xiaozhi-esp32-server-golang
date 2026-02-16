@@ -259,7 +259,10 @@
         />
         
         <div class="mcp-endpoint-display">
-          <div class="endpoint-label">MCP接入点URL：</div>
+          <div class="endpoint-header">
+            <div class="endpoint-label">MCP接入点URL：</div>
+            <el-button size="small" type="primary" @click="copyMCPEndpoint">复制URL</el-button>
+          </div>
           <div class="endpoint-content">
             {{ mcpEndpointData.endpoint }}
           </div>
@@ -282,9 +285,6 @@
 
       <template #footer>
         <el-button @click="showMCPDialog = false">关闭</el-button>
-        <el-button type="primary" @click="copyMCPEndpoint">
-          复制URL
-        </el-button>
       </template>
     </el-dialog>
   </div>
@@ -1175,6 +1175,13 @@ onMounted(async () => {
 
 .mcp-endpoint-display {
   margin: 20px 0;
+}
+
+.endpoint-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
 }
 
 .endpoint-label {
