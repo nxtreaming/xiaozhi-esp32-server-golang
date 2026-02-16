@@ -93,9 +93,8 @@ func GetWsEndpointMcpTools(agentId string) (map[string]tool.InvokableTool, error
 	return mcpClientPool.GetWsEndpointMcpTools(agentId)
 }
 
-// GetReportedToolsByDeviceIdAndAgentId 仅获取设备上报的MCP工具（不包含本地、全局、智能体维度）
-func GetReportedToolsByDeviceIdAndAgentId(deviceId string, agentId string) (map[string]tool.InvokableTool, error) {
-	_ = agentId
+// GetReportedToolsByDeviceID 仅获取设备上报的MCP工具
+func GetReportedToolsByDeviceID(deviceId string) (map[string]tool.InvokableTool, error) {
 	retTools := make(map[string]tool.InvokableTool)
 	if deviceId == "" {
 		return retTools, nil
@@ -113,19 +112,59 @@ func GetReportedToolsByDeviceIdAndAgentId(deviceId string, agentId string) (map[
 	return retTools, nil
 }
 
-// GetReportedToolByName 仅在设备上报的MCP工具中查找并返回
-func GetReportedToolByName(deviceId string, agentId string, toolName string) (tool.InvokableTool, bool) {
-	reportedTools, err := GetReportedToolsByDeviceIdAndAgentId(deviceId, agentId)
+// GetReportedToolsByAgentID 仅获取智能体(WebSocket端点)上报的MCP工具
+func GetReportedToolsByAgentID(agentId string) (map[string]tool.InvokableTool, error) {
+	retTools := make(map[string]tool.InvokableTool)
+	if agentId == "" {
+		return retTools, nil
+	}
+
+	return mcpClientPool.GetWsEndpointMcpTools(agentId)
+}
+
+// GetReportedToolByDeviceIDAndName 仅在设备上报工具中查找
+func GetReportedToolByDeviceIDAndName(deviceId, toolName string) (tool.InvokableTool, bool) {
+	reportedTools, err := GetReportedToolsByDeviceID(deviceId)
 	if err != nil {
-		log.Errorf("获取上报MCP工具失败: device=%s agent=%s err=%v", deviceId, agentId, err)
+		log.Errorf("获取设备上报MCP工具失败: device=%s err=%v", deviceId, err)
 		return nil, false
 	}
 
 	invokable, ok := reportedTools[toolName]
-	if ok {
-		return invokable, true
+	return invokable, ok
+}
+
+// GetReportedToolByAgentIDAndName 仅在智能体上报工具中查找
+func GetReportedToolByAgentIDAndName(agentId, toolName string) (tool.InvokableTool, bool) {
+	reportedTools, err := GetReportedToolsByAgentID(agentId)
+	if err != nil {
+		log.Errorf("获取智能体上报MCP工具失败: agent=%s err=%v", agentId, err)
+		return nil, false
 	}
 
+	invokable, ok := reportedTools[toolName]
+	return invokable, ok
+}
+
+// GetReportedToolsByDeviceIdAndAgentId 兼容方法：明确分流设备/智能体查询，不再混用
+func GetReportedToolsByDeviceIdAndAgentId(deviceId string, agentId string) (map[string]tool.InvokableTool, error) {
+	if deviceId != "" {
+		return GetReportedToolsByDeviceID(deviceId)
+	}
+	if agentId != "" {
+		return GetReportedToolsByAgentID(agentId)
+	}
+	return make(map[string]tool.InvokableTool), nil
+}
+
+// GetReportedToolByName 兼容方法：按维度分流，不再混用
+func GetReportedToolByName(deviceId string, agentId string, toolName string) (tool.InvokableTool, bool) {
+	if deviceId != "" {
+		return GetReportedToolByDeviceIDAndName(deviceId, toolName)
+	}
+	if agentId != "" {
+		return GetReportedToolByAgentIDAndName(agentId, toolName)
+	}
 	return nil, false
 }
 

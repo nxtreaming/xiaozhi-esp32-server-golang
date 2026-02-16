@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cloudwego/eino/components/tool"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	cmap "github.com/orcaman/concurrent-map/v2"
@@ -1001,15 +1002,8 @@ func buildExampleFromSchema(schema map[string]interface{}) interface{} {
 	}
 }
 
-func getMcpTools(agentID, deviceID string) ([]map[string]interface{}, error) {
+func convertReportedToolsToToolList(reportedTools map[string]tool.InvokableTool) ([]map[string]interface{}, error) {
 	toolList := make([]map[string]interface{}, 0)
-
-	// 仅返回设备/智能体上报的MCP工具，不包含本地与全局MCP
-	reportedTools, err := mcp.GetReportedToolsByDeviceIdAndAgentId(deviceID, agentID)
-	if err != nil {
-		log.Errorf("获取上报MCP工具列表失败: %v", err)
-		return toolList, err
-	}
 
 	names := make([]string, 0, len(reportedTools))
 	for name := range reportedTools {
@@ -1042,6 +1036,26 @@ func getMcpTools(agentID, deviceID string) ([]map[string]interface{}, error) {
 	return toolList, nil
 }
 
+func getDeviceMcpTools(deviceID string) ([]map[string]interface{}, error) {
+	reportedTools, err := mcp.GetReportedToolsByDeviceID(deviceID)
+	if err != nil {
+		log.Errorf("获取设备上报MCP工具列表失败: %v", err)
+		return nil, err
+	}
+
+	return convertReportedToolsToToolList(reportedTools)
+}
+
+func getAgentMcpTools(agentID string) ([]map[string]interface{}, error) {
+	reportedTools, err := mcp.GetReportedToolsByAgentID(agentID)
+	if err != nil {
+		log.Errorf("获取智能体上报MCP工具列表失败: %v", err)
+		return nil, err
+	}
+
+	return convertReportedToolsToToolList(reportedTools)
+}
+
 // handleMcpToolListRequest 处理MCP工具列表请求
 func (c *WebSocketClient) handleMcpToolListRequest(request *WebSocketRequest) {
 	// 从请求体中获取agent_id/device_id
@@ -1066,8 +1080,22 @@ func (c *WebSocketClient) handleMcpToolListRequest(request *WebSocketRequest) {
 
 	log.Infof("处理MCP工具列表请求，agent_id: %s, device_id: %s", agentID, deviceID)
 
-	// 获取工具列表
-	toolList, err := getMcpTools(agentID, deviceID)
+	if agentID != "" && deviceID != "" {
+		if err := c.SendResponse(request.ID, 400, nil, "agent_id与device_id不能同时传入"); err != nil {
+			log.Errorf("发送错误响应失败: %v", err)
+		}
+		return
+	}
+
+	var (
+		toolList []map[string]interface{}
+		err      error
+	)
+	if deviceID != "" {
+		toolList, err = getDeviceMcpTools(deviceID)
+	} else {
+		toolList, err = getAgentMcpTools(agentID)
+	}
 	if err != nil {
 		log.Errorf("获取MCP工具列表失败: %v", err)
 		if err := c.SendResponse(request.ID, 500, nil, fmt.Sprintf("获取工具列表失败: %v", err)); err != nil {
@@ -1206,8 +1234,20 @@ func (c *WebSocketClient) handleMcpToolCallRequest(request *WebSocketRequest) {
 		return
 	}
 
-	// 仅处理设备/智能体上报的MCP工具
-	invokable, ok := mcp.GetReportedToolByName(deviceID, agentID, toolName)
+	if agentID != "" && deviceID != "" {
+		_ = c.SendResponse(request.ID, 400, nil, "agent_id与device_id不能同时传入")
+		return
+	}
+
+	var (
+		invokable tool.InvokableTool
+		ok        bool
+	)
+	if deviceID != "" {
+		invokable, ok = mcp.GetReportedToolByDeviceIDAndName(deviceID, toolName)
+	} else {
+		invokable, ok = mcp.GetReportedToolByAgentIDAndName(agentID, toolName)
+	}
 	if !ok {
 		_ = c.SendResponse(request.ID, 404, nil, fmt.Sprintf("工具不存在: %s", toolName))
 		return
