@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	data_client "xiaozhi-esp32-server-golang/internal/data/client"
 	"xiaozhi-esp32-server-golang/internal/data/history"
 	"xiaozhi-esp32-server-golang/internal/domain/eventbus"
 	"xiaozhi-esp32-server-golang/internal/domain/memory/llm_memory"
@@ -144,7 +145,7 @@ func (w *MessageWorker) processMemoryProvider(event *eventbus.AddMessageEvent) {
 	if clientState.MemoryProvider == nil {
 		return
 	}
-	if clientState.GetMemoryMode() != MemoryModeLong {
+	if clientState.GetMemoryMode() != data_client.MemoryModeLong {
 		return
 	}
 
