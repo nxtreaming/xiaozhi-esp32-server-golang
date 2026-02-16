@@ -672,7 +672,7 @@ const updateMcpExampleByTool = (toolName) => {
   const selectedTool = mcpTools.value.find(item => item.name === toolName)
   if (!selectedTool) return
 
-  const example = selectedTool.example_arguments ?? buildExampleFromSchema(selectedTool.input_schema || {})
+  const example = buildExampleFromSchema(selectedTool.input_schema || {})
   mcpCallForm.value.argumentsText = JSON.stringify(example ?? {}, null, 2)
 }
 

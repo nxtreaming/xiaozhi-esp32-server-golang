@@ -53,11 +53,10 @@ type WebSocketResponse struct {
 }
 
 type MCPTool struct {
-	Name             string                 `json:"name"`
-	Description      string                 `json:"description,omitempty"`
-	Schema           bool                   `json:"schema"`
-	InputSchema      map[string]interface{} `json:"input_schema,omitempty"`
-	ExampleArguments interface{}            `json:"example_arguments,omitempty"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description,omitempty"`
+	Schema      bool                   `json:"schema"`
+	InputSchema map[string]interface{} `json:"input_schema,omitempty"`
 }
 
 // NewWebSocketController 创建WebSocket控制器
@@ -658,9 +657,6 @@ func (ctrl *WebSocketController) requestMcpToolsByBody(ctx context.Context, body
 			parsed := MCPTool{Name: name, Description: description, Schema: true}
 			if inputSchema, ok := toolMap["input_schema"].(map[string]interface{}); ok {
 				parsed.InputSchema = inputSchema
-			}
-			if example, ok := toolMap["example_arguments"]; ok {
-				parsed.ExampleArguments = example
 			}
 			tools = append(tools, parsed)
 		}

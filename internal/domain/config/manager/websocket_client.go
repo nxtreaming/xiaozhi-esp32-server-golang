@@ -961,47 +961,6 @@ func toolInfoToSchemaMap(paramsOneOf interface{}) map[string]interface{} {
 	return decoded
 }
 
-func buildExampleFromSchema(schema map[string]interface{}) interface{} {
-	if schema == nil {
-		return map[string]interface{}{}
-	}
-
-	if enumValues, ok := schema["enum"].([]interface{}); ok && len(enumValues) > 0 {
-		return enumValues[0]
-	}
-
-	typeValue, _ := schema["type"].(string)
-	switch typeValue {
-	case "object", "":
-		result := map[string]interface{}{}
-		if properties, ok := schema["properties"].(map[string]interface{}); ok {
-			keys := make([]string, 0, len(properties))
-			for key := range properties {
-				keys = append(keys, key)
-			}
-			sort.Strings(keys)
-			for _, key := range keys {
-				propSchema, _ := properties[key].(map[string]interface{})
-				result[key] = buildExampleFromSchema(propSchema)
-			}
-		}
-		return result
-	case "array":
-		if items, ok := schema["items"].(map[string]interface{}); ok {
-			return []interface{}{buildExampleFromSchema(items)}
-		}
-		return []interface{}{}
-	case "number":
-		return 0.1
-	case "integer":
-		return 0
-	case "boolean":
-		return false
-	default:
-		return ""
-	}
-}
-
 func convertReportedToolsToToolList(reportedTools map[string]tool.InvokableTool) ([]map[string]interface{}, error) {
 	toolList := make([]map[string]interface{}, 0)
 
@@ -1026,7 +985,6 @@ func convertReportedToolsToToolList(reportedTools map[string]tool.InvokableTool)
 			inputSchema := toolInfoToSchemaMap(info.ParamsOneOf)
 			if inputSchema != nil {
 				toolInfo["input_schema"] = inputSchema
-				toolInfo["example_arguments"] = buildExampleFromSchema(inputSchema)
 			}
 		}
 
