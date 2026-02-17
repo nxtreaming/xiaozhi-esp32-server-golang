@@ -31,10 +31,16 @@ xiaozhi-aio/
 ### Windows
 双击 `start.bat`
 
-### Linux / macOS
+### Linux
 ```bash
 chmod +x xiaozhi_server
-./xiaozhi_server
+LD_LIBRARY_PATH="$PWD/ten-vad/lib/Linux/x64:${LD_LIBRARY_PATH:-}" ./xiaozhi_server
+```
+
+### macOS
+```bash
+chmod +x xiaozhi_server
+DYLD_FRAMEWORK_PATH="$PWD/ten-vad/lib/macOS" ./xiaozhi_server
 ```
 
 ---
