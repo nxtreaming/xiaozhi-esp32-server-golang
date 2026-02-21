@@ -41,6 +41,11 @@
           <el-icon><Microphone /></el-icon>
           <span>声音复刻</span>
         </el-menu-item>
+
+        <el-menu-item v-if="!authStore.isAdmin" index="/user/knowledge-bases">
+          <el-icon><Document /></el-icon>
+          <span>我的知识库</span>
+        </el-menu-item>
         
         <!-- 服务配置 -->
         <el-sub-menu v-if="authStore.isAdmin" index="/admin/service-config">
@@ -73,6 +78,7 @@
           <el-menu-item index="/admin/tts-config">TTS配置</el-menu-item>
           <el-menu-item index="/admin/vision-config">Vision配置</el-menu-item>
           <el-menu-item index="/admin/memory-config">Memory配置</el-menu-item>
+          <el-menu-item index="/admin/knowledge-search-config">知识库检索配置</el-menu-item>
         </el-sub-menu>
         
         <!-- 系统监控 -->
@@ -181,7 +187,8 @@ import {
   Microphone,
   DataAnalysis,
   Guide,
-  Upload
+  Upload,
+  Document
 } from '@element-plus/icons-vue'
 
 const router = useRouter()

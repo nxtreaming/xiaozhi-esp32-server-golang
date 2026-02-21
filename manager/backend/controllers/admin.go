@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -78,6 +79,17 @@ func (ac *AdminController) GetDeviceConfigs(c *gin.Context) {
 		VoiceModelOverride *string  `json:"voice_model_override,omitempty"`
 	}
 
+	type KnowledgeBaseInfo struct {
+		ID                 uint     `json:"id"`
+		Name               string   `json:"name"`
+		Description        string   `json:"description"`
+		Provider           string   `json:"provider"`
+		ExternalKBID       string   `json:"external_kb_id"`
+		ExternalDocID      string   `json:"external_doc_id"`
+		RetrievalThreshold *float64 `json:"retrieval_threshold"`
+		Status             string   `json:"status"`
+	}
+
 	type ConfigResponse struct {
 		VAD             models.Config               `json:"vad"`
 		ASR             models.Config               `json:"asr"`
@@ -85,6 +97,7 @@ func (ac *AdminController) GetDeviceConfigs(c *gin.Context) {
 		TTS             models.Config               `json:"tts"`
 		Memory          models.Config               `json:"memory"`
 		VoiceIdentify   map[string]SpeakerGroupInfo `json:"voice_identify"`
+		KnowledgeBases  []KnowledgeBaseInfo         `json:"knowledge_bases"`
 		Prompt          string                      `json:"prompt"`
 		AgentID         string                      `json:"agent_id"`
 		MemoryMode      string                      `json:"memory_mode"`
@@ -392,8 +405,18 @@ func (ac *AdminController) GetDeviceConfigs(c *gin.Context) {
 
 	// 获取Memory默认配置
 	if err := ac.DB.Where("type = ? AND is_default = ? AND enabled = ?", "memory", true, true).First(&response.Memory).Error; err != nil {
-		//c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get default Memory config"})
-		//return
+		// 允许没有默认 Memory 配置：显式回退为 nomemo（不启用长记忆）。
+		response.Memory = models.Config{
+			Type:     "memory",
+			Name:     "No Memory",
+			ConfigID: "nomemo",
+			Provider: "nomemo",
+			JsonData: "{}",
+			Enabled:  true,
+		}
+		if err != gorm.ErrRecordNotFound {
+			log.Printf("加载默认Memory配置失败，已回退nomemo: %v", err)
+		}
 	}
 
 	// 获取VoiceIdentify配置：检查智能体是否关联了声纹组
@@ -430,13 +453,62 @@ func (ac *AdminController) GetDeviceConfigs(c *gin.Context) {
 		}
 	}
 
+	// 下发智能体关联知识库（含 provider），供主程序本地RAG使用
+	response.KnowledgeBases = make([]KnowledgeBaseInfo, 0)
+	if deviceFound && agent.ID != 0 {
+		var links []models.AgentKnowledgeBase
+		if err := ac.DB.Where("agent_id = ?", agent.ID).Order("id ASC").Find(&links).Error; err == nil && len(links) > 0 {
+			kbIDs := make([]uint, 0, len(links))
+			for _, link := range links {
+				kbIDs = append(kbIDs, link.KnowledgeBaseID)
+			}
+			var kbs []models.KnowledgeBase
+			if err := ac.DB.Where("id IN ? AND status = ?", kbIDs, "active").Find(&kbs).Error; err == nil {
+				kbMap := make(map[uint]models.KnowledgeBase, len(kbs))
+				for _, kb := range kbs {
+					kbMap[kb.ID] = kb
+				}
+				for _, link := range links {
+					kb, ok := kbMap[link.KnowledgeBaseID]
+					if !ok {
+						continue
+					}
+					provider := strings.TrimSpace(kb.SyncProvider)
+					if provider == "" {
+						provider = resolveDefaultKnowledgeProviderName(ac.DB)
+					}
+					externalDocID := strings.TrimSpace(kb.ExternalDocID)
+					if externalDocID == "" {
+						var doc models.KnowledgeBaseDocument
+						if err := ac.DB.
+							Where("knowledge_base_id = ? AND sync_status = ? AND external_doc_id <> ''", kb.ID, knowledgeSyncStatusSynced).
+							Order("id DESC").
+							First(&doc).Error; err == nil {
+							externalDocID = strings.TrimSpace(doc.ExternalDocID)
+						}
+					}
+					response.KnowledgeBases = append(response.KnowledgeBases, KnowledgeBaseInfo{
+						ID:                 kb.ID,
+						Name:               kb.Name,
+						Description:        kb.Description,
+						Provider:           provider,
+						ExternalKBID:       strings.TrimSpace(kb.ExternalKBID),
+						ExternalDocID:      externalDocID,
+						RetrievalThreshold: kb.RetrievalThreshold,
+						Status:             kb.Status,
+					})
+				}
+			}
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{"data": response})
 }
 
 // getSystemConfigsData 获取系统配置数据（与 GetSystemConfigs 返回的 data 一致），供接口与 WebSocket 推送复用
 func (ac *AdminController) getSystemConfigsData() (gin.H, error) {
 	var allConfigs []models.Config
-	if err := ac.DB.Where("type IN (?)", []string{"mqtt", "mqtt_server", "udp", "ota", "mcp", "local_mcp", "voice_identify", "tts", "vad", "asr", "llm", "vision", "auth", "chat"}).Find(&allConfigs).Error; err != nil {
+	if err := ac.DB.Where("type IN (?)", []string{"mqtt", "mqtt_server", "udp", "ota", "mcp", "local_mcp", "voice_identify", "tts", "vad", "asr", "llm", "vision", "auth", "chat", "knowledge_search"}).Find(&allConfigs).Error; err != nil {
 		return nil, err
 	}
 
@@ -643,6 +715,54 @@ func (ac *AdminController) getSystemConfigsData() (gin.H, error) {
 	// 处理独立的local_mcp配置（如果存在）
 	if configs, exists := configsByType["local_mcp"]; exists && len(configs) > 0 {
 		response["local_mcp"] = selectAndParseConfig(configs)
+	}
+
+	// 处理知识库全局配置：knowledge.default_provider + knowledge.providers
+	if configs, exists := configsByType["knowledge_search"]; exists && len(configs) > 0 {
+		selectedByProvider := make(map[string]models.Config)
+		for _, cfg := range configs {
+			if !cfg.Enabled {
+				continue
+			}
+			provider := strings.ToLower(strings.TrimSpace(cfg.Provider))
+			if provider == "" {
+				continue
+			}
+			prev, exists := selectedByProvider[provider]
+			if !exists || (!prev.IsDefault && cfg.IsDefault) {
+				selectedByProvider[provider] = cfg
+			}
+		}
+
+		if len(selectedByProvider) > 0 {
+			providerNames := make([]string, 0, len(selectedByProvider))
+			for provider := range selectedByProvider {
+				providerNames = append(providerNames, provider)
+			}
+			sort.Strings(providerNames)
+
+			providers := make(gin.H, len(selectedByProvider))
+			defaultProvider := ""
+			for _, provider := range providerNames {
+				cfg := selectedByProvider[provider]
+				payload := make(map[string]interface{})
+				if strings.TrimSpace(cfg.JsonData) != "" {
+					_ = json.Unmarshal([]byte(cfg.JsonData), &payload)
+				}
+				providers[provider] = payload
+				if cfg.IsDefault {
+					defaultProvider = provider
+				}
+			}
+			if defaultProvider == "" {
+				defaultProvider = providerNames[0]
+			}
+
+			response["knowledge"] = gin.H{
+				"default_provider": defaultProvider,
+				"providers":        providers,
+			}
+		}
 	}
 
 	// 当未配置人工 mcp(type=mcp) 但已存在市场导入服务时，补齐默认 mcp/local_mcp，确保可下发聚合结果
@@ -4448,18 +4568,6 @@ func (ac *AdminController) CreateMemoryConfig(c *gin.Context) {
 	if config.Provider != "memobase" && config.Provider != "mem0" && config.Provider != "memos" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Provider必须是memobase、mem0或memos"})
 		return
-	}
-
-	// 检查是否已存在Memory配置，如果不存在则自动设置为默认配置
-	var existingCount int64
-	if err := ac.DB.Model(&models.Config{}).Where("type = ?", "memory").Count(&existingCount).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "检查Memory配置失败"})
-		return
-	}
-
-	// 如果这是第一个Memory配置，自动设置为默认配置
-	if existingCount == 0 {
-		config.IsDefault = true
 	}
 
 	// 如果设置为默认配置，先取消其他同类型的默认配置

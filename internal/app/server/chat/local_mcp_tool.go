@@ -61,6 +61,12 @@ func InitChatLocalMCPTools() {
 			Params:      struct{}{},
 			Handle:      restoreDeviceDefaultRoleHandler,
 		},
+		"search_knowledge": {
+			Name:        "search_knowledge",
+			Description: "当用户问题需要事实依据、流程规则、参数细节、文档条款时，检索当前智能体关联知识库并返回相关片段；可选传 knowledge_base_ids 仅查指定知识库；闲聊或纯创作场景不要调用",
+			Params:      SearchKnowledgeParams{},
+			Handle:      searchKnowledgeHandler,
+		},
 		/*"play_music": {
 			Name:        "play_music",
 			Description: "当用户想听歌、无聊时、想放空大脑时使用，用于播放指定名称的音乐，当用户想随便听一首音乐时请推荐出具体的歌曲名称，当有多个音乐播放工具时优先使用此工具，**此工具调用耗时较长，需要先返回友好的过渡性提示语**",
@@ -106,6 +112,12 @@ func RegisterLocalMcpFunc(name string, description string, params any, handle mc
 
 type SwitchDeviceRoleParams struct {
 	RoleName string `json:"role_name" description:"目标角色名称，支持模糊匹配" required:"true"`
+}
+
+type SearchKnowledgeParams struct {
+	Query            string `json:"query" description:"要检索的查询内容" required:"true"`
+	TopK             int    `json:"top_k,omitempty" description:"返回条数，默认5"`
+	KnowledgeBaseIDs []uint `json:"knowledge_base_ids,omitempty" description:"可选：仅在这些知识库ID内检索（当前智能体已关联）"`
 }
 
 // playMusicHandler 播放音乐的处理函数
@@ -359,6 +371,69 @@ func restoreDeviceDefaultRoleHandler(ctx context.Context, argumentsInJSON string
 	}
 
 	return "", fmt.Errorf("从context中未找到chat_session_operator")
+}
+
+func searchKnowledgeHandler(ctx context.Context, argumentsInJSON string) (string, error) {
+	log.Info("执行知识库检索工具")
+
+	var params SearchKnowledgeParams
+	if argumentsInJSON != "" {
+		if err := json.Unmarshal([]byte(argumentsInJSON), &params); err != nil {
+			response := NewErrorResponse("search_knowledge", "参数解析失败", "PARSE_ERROR", "请检查 query 参数格式")
+			return response.ToJSON()
+		}
+	}
+	params.Query = strings.TrimSpace(params.Query)
+	if params.Query == "" {
+		response := NewErrorResponse("search_knowledge", "query 不能为空", "INVALID_QUERY", "请提供要检索的内容")
+		return response.ToJSON()
+	}
+	if params.TopK <= 0 {
+		params.TopK = 5
+	}
+
+	chatSessionOperatorValue := ctx.Value("chat_session_operator")
+	if chatSessionOperatorValue == nil {
+		return "", fmt.Errorf("从context中未找到chat_session_operator")
+	}
+	chatSessionOperator, ok := chatSessionOperatorValue.(ChatSessionOperator)
+	if !ok {
+		return "", fmt.Errorf("从context中获取的chat_session_operator不是ChatSessionOperator类型")
+	}
+
+	hits, err := chatSessionOperator.LocalMcpSearchKnowledge(ctx, params.Query, params.TopK, params.KnowledgeBaseIDs)
+	if err != nil {
+		response := NewErrorResponse("search_knowledge", fmt.Sprintf("信息检索失败: %v", err), "SEARCH_FAILED", "请稍后重试")
+		return response.ToJSON()
+	}
+
+	data := map[string]interface{}{
+		"query": params.Query,
+		"hits":  hits,
+		"count": len(hits),
+	}
+	if len(hits) == 0 {
+		response := NewContentResponse("search_knowledge", data, "未找到足够相关信息")
+		return response.ToJSON()
+	}
+
+	var builder strings.Builder
+	for i, hit := range hits {
+		content := strings.TrimSpace(hit.Content)
+		if content == "" {
+			continue
+		}
+		if len(content) > 200 {
+			content = content[:200] + "..."
+		}
+		builder.WriteString(fmt.Sprintf("%d. %s\n", i+1, content))
+	}
+	msg := strings.TrimSpace(builder.String())
+	if msg == "" {
+		msg = "已获取相关信息"
+	}
+	response := NewContentResponse("search_knowledge", data, msg)
+	return response.ToJSON()
 }
 
 // getWeekNumber 获取周数

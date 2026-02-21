@@ -1507,16 +1507,6 @@ func maskSecret(secret string) string {
 	return fmt.Sprintf("%s...%s(len=%d)", secret[:4], secret[len(secret)-4:], len(secret))
 }
 
-func truncateForLog(s string, max int) string {
-	if max <= 0 {
-		return ""
-	}
-	if len(s) <= max {
-		return s
-	}
-	return s[:max] + "...(truncated)"
-}
-
 func getMinimaxCloneAudioDurationSeconds(filePath string) (float64, error) {
 	ext := strings.ToLower(strings.TrimSpace(filepath.Ext(filePath)))
 	if ext != ".wav" {

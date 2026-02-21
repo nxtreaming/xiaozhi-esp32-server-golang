@@ -51,6 +51,48 @@ type Agent struct {
 	UpdatedAt       time.Time `json:"updated_at"`
 }
 
+// KnowledgeBase 用户知识库（每用户独立）
+type KnowledgeBase struct {
+	ID                 uint       `json:"id" gorm:"primarykey"`
+	UserID             uint       `json:"user_id" gorm:"not null;index"`
+	Name               string     `json:"name" gorm:"type:varchar(100);not null"`
+	Description        string     `json:"description" gorm:"type:text"`
+	Content            string     `json:"content" gorm:"type:text"`
+	RetrievalThreshold *float64   `json:"retrieval_threshold" gorm:"type:double"`         // 检索阈值（为空表示继承全局配置）
+	ExternalKBID       string     `json:"external_kb_id" gorm:"type:varchar(255);index"`  // 外部知识库ID（Dify dataset_id）
+	ExternalDocID      string     `json:"external_doc_id" gorm:"type:varchar(255);index"` // 外部文档ID（Dify document_id）
+	AutoDataset        bool       `json:"auto_dataset" gorm:"default:false"`              // 是否由系统自动创建dataset
+	SyncProvider       string     `json:"sync_provider" gorm:"type:varchar(50);index"`    // 同步provider（当前为dify）
+	SyncStatus         string     `json:"sync_status" gorm:"type:varchar(20);default:'pending';index"`
+	SyncError          string     `json:"sync_error" gorm:"type:text"`
+	LastSyncedAt       *time.Time `json:"last_synced_at"`
+	Status             string     `json:"status" gorm:"type:varchar(20);default:'active';index"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
+}
+
+// KnowledgeBaseDocument 知识库文档（一个知识库可包含多个文档）
+type KnowledgeBaseDocument struct {
+	ID              uint       `json:"id" gorm:"primarykey"`
+	KnowledgeBaseID uint       `json:"knowledge_base_id" gorm:"not null;index"`
+	Name            string     `json:"name" gorm:"type:varchar(200);not null"`
+	Content         string     `json:"content" gorm:"type:text"`
+	ExternalDocID   string     `json:"external_doc_id" gorm:"type:varchar(255);index"` // Dify document_id
+	SyncStatus      string     `json:"sync_status" gorm:"type:varchar(20);default:'pending';index"`
+	SyncError       string     `json:"sync_error" gorm:"type:text"`
+	LastSyncedAt    *time.Time `json:"last_synced_at"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+}
+
+// AgentKnowledgeBase 智能体与知识库的多对多关联
+type AgentKnowledgeBase struct {
+	ID              uint      `json:"id" gorm:"primarykey"`
+	AgentID         uint      `json:"agent_id" gorm:"not null;index;uniqueIndex:idx_agent_kb_unique,priority:1"`
+	KnowledgeBaseID uint      `json:"knowledge_base_id" gorm:"not null;index;uniqueIndex:idx_agent_kb_unique,priority:2"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
 // 通用配置模型
 type Config struct {
 	ID        uint      `json:"id" gorm:"primarykey"`

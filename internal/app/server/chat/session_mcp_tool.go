@@ -12,7 +12,9 @@ import (
 	"time"
 
 	user_config "xiaozhi-esp32-server-golang/internal/domain/config"
+	config_types "xiaozhi-esp32-server-golang/internal/domain/config/types"
 	llm_memory "xiaozhi-esp32-server-golang/internal/domain/memory/llm_memory"
+	"xiaozhi-esp32-server-golang/internal/domain/rag"
 	log "xiaozhi-esp32-server-golang/logger"
 
 	"github.com/spf13/viper"
@@ -165,6 +167,14 @@ func (c *ChatManager) LocalMcpRestoreDeviceDefaultRole(ctx context.Context) erro
 
 	log.Infof("设备 %s 恢复默认角色成功", c.DeviceID)
 	return nil
+}
+
+// LocalMcpSearchKnowledge 检索当前智能体绑定的知识库
+func (c *ChatManager) LocalMcpSearchKnowledge(ctx context.Context, query string, topK int, knowledgeBaseIDs []uint) ([]config_types.KnowledgeSearchHit, error) {
+	if c == nil || c.clientState == nil {
+		return nil, fmt.Errorf("会话状态不可用")
+	}
+	return rag.Search(ctx, query, topK, c.clientState.DeviceConfig.KnowledgeBases, knowledgeBaseIDs)
 }
 
 // searchMusicFromAPI 从API搜索音乐

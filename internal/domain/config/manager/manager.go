@@ -80,10 +80,11 @@ func (c *ConfigManager) GetUserConfig(ctx context.Context, deviceID string) (typ
 				Voice              *string  `json:"voice"`
 				VoiceModelOverride *string  `json:"voice_model_override"`
 			} `json:"voice_identify"`
-			Prompt          string `json:"prompt"`
-			AgentId         string `json:"agent_id"`
-			MemoryMode      string `json:"memory_mode"`
-			MCPServiceNames string `json:"mcp_service_names"`
+			KnowledgeBases  []types.KnowledgeBaseRef `json:"knowledge_bases"`
+			Prompt          string                   `json:"prompt"`
+			AgentId         string                   `json:"agent_id"`
+			MemoryMode      string                   `json:"memory_mode"`
+			MCPServiceNames string                   `json:"mcp_service_names"`
 		} `json:"data"`
 	}
 
@@ -156,6 +157,7 @@ func (c *ConfigManager) GetUserConfig(ctx context.Context, deviceID string) (typ
 			Provider: response.Data.Memory.Provider,
 			Config:   parseJsonData(response.Data.Memory.JsonData),
 		},
+		KnowledgeBases:  response.Data.KnowledgeBases,
 		VoiceIdentify:   voiceIdentifyData,
 		MemoryMode:      response.Data.MemoryMode,
 		AgentId:         response.Data.AgentId,
@@ -304,6 +306,7 @@ func (c *ConfigManager) RestoreDeviceDefaultRole(ctx context.Context, deviceID s
 	return nil
 }
 
+// SearchKnowledge 通过管理后台统一检索知识库（控制台按provider转发）
 func (c *ConfigManager) NotifyDeviceEvent(ctx context.Context, eventType string, eventData map[string]interface{}) {
 	_, err := SendDeviceRequest(ctx, eventType, eventData)
 	if err != nil {

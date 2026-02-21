@@ -117,6 +117,23 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 				user.GET("/agents/:id/devices", userController.GetAgentDevices)
 				user.POST("/agents/:id/devices", userController.AddDeviceToAgent)
 				user.DELETE("/agents/:id/devices/:device_id", userController.RemoveDeviceFromAgent)
+				user.GET("/agents/:id/knowledge-bases", userController.GetAgentKnowledgeBases)
+				user.PUT("/agents/:id/knowledge-bases", userController.UpdateAgentKnowledgeBases)
+
+				// 用户知识库管理（纯文本）
+				user.GET("/knowledge-bases", userController.GetKnowledgeBases)
+				user.POST("/knowledge-bases", userController.CreateKnowledgeBase)
+				user.GET("/knowledge-bases/:id", userController.GetKnowledgeBase)
+				user.PUT("/knowledge-bases/:id", userController.UpdateKnowledgeBase)
+				user.DELETE("/knowledge-bases/:id", userController.DeleteKnowledgeBase)
+				user.POST("/knowledge-bases/:id/sync", userController.SyncKnowledgeBase)
+				user.POST("/knowledge-bases/:id/test-search", userController.TestKnowledgeBaseSearch)
+				user.GET("/knowledge-bases/:id/documents", userController.GetKnowledgeBaseDocuments)
+				user.POST("/knowledge-bases/:id/documents", userController.CreateKnowledgeBaseDocument)
+				user.POST("/knowledge-bases/:id/documents/upload", userController.CreateKnowledgeBaseDocumentByUpload)
+				user.PUT("/knowledge-bases/:id/documents/:doc_id", userController.UpdateKnowledgeBaseDocument)
+				user.DELETE("/knowledge-bases/:id/documents/:doc_id", userController.DeleteKnowledgeBaseDocument)
+				user.POST("/knowledge-bases/:id/documents/:doc_id/sync", userController.SyncKnowledgeBaseDocument)
 
 				// 角色模板和音色选项
 				user.GET("/role-templates", userController.GetRoleTemplates)
@@ -270,6 +287,13 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 				admin.DELETE("/memory-configs/:id", adminController.DeleteMemoryConfig)
 				admin.POST("/memory-configs/:id/set-default", adminController.SetDefaultMemoryConfig)
 
+				// 知识库检索配置管理（provider API 调用）
+				admin.GET("/knowledge-search-configs", adminController.GetKnowledgeSearchConfigs)
+				admin.POST("/knowledge-search-configs", adminController.CreateKnowledgeSearchConfig)
+				admin.PUT("/knowledge-search-configs/:id", adminController.UpdateKnowledgeSearchConfig)
+				admin.DELETE("/knowledge-search-configs/:id", adminController.DeleteKnowledgeSearchConfig)
+				admin.POST("/knowledge-search-configs/weknora/models", adminController.ListWeknoraModels)
+
 				// 全局角色管理（保留兼容旧API）
 				admin.GET("/global-roles", adminController.GetGlobalRoles)
 				admin.POST("/global-roles", adminController.CreateGlobalRole)
@@ -309,6 +333,12 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 				admin.PUT("/users/:id", adminController.UpdateUser)
 				admin.DELETE("/users/:id", adminController.DeleteUser)
 				admin.POST("/users/:id/reset-password", adminController.ResetUserPassword)
+
+				admin.GET("/users/:id/knowledge-bases", adminController.GetUserKnowledgeBasesAdmin)
+				admin.POST("/users/:id/knowledge-bases", adminController.CreateUserKnowledgeBaseAdmin)
+				admin.PUT("/users/:id/knowledge-bases/:kb_id", adminController.UpdateUserKnowledgeBaseAdmin)
+				admin.DELETE("/users/:id/knowledge-bases/:kb_id", adminController.DeleteUserKnowledgeBaseAdmin)
+
 				admin.GET("/users/:id/voice-clone-quotas", adminController.GetUserVoiceCloneQuotas)
 				admin.PUT("/users/:id/voice-clone-quotas", adminController.UpdateUserVoiceCloneQuotas)
 

@@ -36,7 +36,6 @@
           <el-switch 
             v-model="scope.row.is_default" 
             @change="toggleDefault(scope.row)"
-            :disabled="scope.row.is_default && getEnabledConfigs.length === 1"
           />
         </template>
       </el-table-column>
@@ -268,10 +267,6 @@ const rules = {
   ]
 }
 
-const getEnabledConfigs = computed(() => {
-  return safeConfigs.value.filter(config => config.enabled)
-})
-
 const formatDate = (dateString) => {
   return new Date(dateString).toLocaleString('zh-CN')
 }
@@ -396,7 +391,16 @@ const toggleDefault = async (config) => {
       ElMessage.success('已设为默认配置')
       await loadConfigs()
     } else {
-      config.is_default = true
+      await api.put(`/admin/memory-configs/${config.id}`, {
+        name: config.name,
+        config_id: config.config_id,
+        provider: config.provider,
+        enabled: config.enabled,
+        is_default: false,
+        json_data: config.json_data || ''
+      })
+      ElMessage.success('已取消默认配置（不启用长记忆）')
+      await loadConfigs()
     }
   } catch (error) {
     config.is_default = !config.is_default

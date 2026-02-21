@@ -1019,6 +1019,12 @@ func (s *ChatSession) actionDoChat(ctx context.Context, text string, speakerResu
 		log.Errorf("获取设备 %s 的工具失败: %v", clientState.DeviceID, err)
 		mcpTools = make(map[string]tool.InvokableTool)
 	}
+	if !hasAvailableKnowledgeBase(clientState.DeviceConfig.KnowledgeBases) {
+		if _, ok := mcpTools["search_knowledge"]; ok {
+			delete(mcpTools, "search_knowledge")
+			log.Infof("设备 %s 未关联可用知识库，已移除工具 search_knowledge", clientState.DeviceID)
+		}
+	}
 
 	// 将MCP工具转换为接口格式以便传递给转换函数
 	mcpToolsInterface := make(map[string]interface{})
@@ -1047,6 +1053,19 @@ func (s *ChatSession) actionDoChat(ctx context.Context, text string, speakerResu
 		return fmt.Errorf("发送带工具的 LLM 请求失败: %v", err)
 	}
 	return nil
+}
+
+func hasAvailableKnowledgeBase(knowledgeBases []types.KnowledgeBaseRef) bool {
+	for _, kb := range knowledgeBases {
+		if strings.EqualFold(strings.TrimSpace(kb.Status), "inactive") {
+			continue
+		}
+		if strings.TrimSpace(kb.ExternalKBID) == "" {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 // switchTTSForSpeaker 为识别的说话人切换TTS
