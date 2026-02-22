@@ -234,7 +234,7 @@ type VoiceCloneAudio struct {
 // VoiceCloneTask 声音复刻异步任务模型
 type VoiceCloneTask struct {
 	ID           uint       `json:"id" gorm:"primarykey"`
-	TaskID       string     `json:"task_id" gorm:"type:varchar(64);not null;uniqueIndex;index"`
+	TaskID       string     `json:"task_id" gorm:"type:varchar(64);not null;uniqueIndex"`
 	UserID       uint       `json:"user_id" gorm:"not null;index"`
 	VoiceCloneID uint       `json:"voice_clone_id" gorm:"not null;index"`
 	Provider     string     `json:"provider" gorm:"type:varchar(50);not null;index"`
